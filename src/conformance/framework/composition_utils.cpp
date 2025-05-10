@@ -612,6 +612,49 @@ namespace Conformance
         return swapchain;
     }
 
+    XrSwapchain CompositionHelper::CreateCubeStaticSwapchainImage(const RGBAImage* rgbaImage)
+    {
+        if (!GetGlobalData().IsUsingGraphicsPlugin()) {
+            return XR_NULL_HANDLE;
+        }
+
+        // The swapchain format must be R8G8B8A8 UNORM to match the RGBAImage format.
+        const int64_t format = GetGlobalData().graphicsPlugin->GetSRGBA8Format();
+        auto swapchainCreateInfo =
+            DefaultColorSwapchainCreateInfo(rgbaImage.width, rgbaImage.height, XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT, format);
+        swapchainCreateInfo.faceCount = 6;
+        swapchainCreateInfo.usageFlags |= XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
+        const XrSwapchain swapchain = CreateSwapchain(swapchainCreateInfo);
+
+        RGBAImage srgbImage[6];
+        for(int i=0; i<6; i++){
+            srgbImage[i] = rgbaImage[i];
+            if (!rgbaImage[i].isSrgb)
+                srgbImage[i].ConvertToSRGB();
+        }
+        AcquireWaitReleaseImage(swapchain, [&](const XrSwapchainImageBaseHeader* swapchainImage) {
+            for(int i=0; i<6; i++){
+                GetGlobalData().graphicsPlugin->CopyRGBAImage(swapchainImage, 0, srgbImage[i], i);
+            }
+        });
+
+        return swapchain;
+    }
+
+    XrSwapchain CompositionHelper::CreateCubeStaticSwapchainSolidColor(const XrColor4f* color)
+    {
+        // Avoid using a 1x1 image here since runtimes may do special processing near texture edges.
+        RGBAImage image[6];
+
+        for(int i=0; i<6; i++){
+            image[i] = RGBAImage(256, 256);
+            image[i].DrawRect(0, 0, 256, 256, color[i]);
+        }
+
+        return CreateCubeStaticSwapchainImage(image);
+    }
+
+
     XrSwapchainSubImage CompositionHelper::MakeDefaultSubImage(XrSwapchain swapchain, uint32_t imageArrayIndex /*= 0*/)
     {
         std::lock_guard<std::mutex> lock(m_mutex);
@@ -642,6 +685,79 @@ namespace Conformance
         m_quads.push_back(quad);
         return &m_quads.back();
     }
+
+    XrCompositionLayerCylinderKHR* CompositionHelper::CreateCylinderLayer(XrSwapchain swapchain, XrSpace space, 
+                                                       float radius, float centralAngle, float aspectRatio, 
+                                                       XrPosef pose = Pose::Identity)
+    {
+        XrCompositionLayerCylinderKHR layer{XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR};
+        layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        layer.pose = pose;
+        layer.space = space;
+        layer.subImage = MakeDefaultSubImage(swapchain);
+
+        layer.radius = radius;
+        layer.centralAngle = centralAngle;
+        layer.aspectRatio = aspectRatio;
+
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_cylinders.push_back(layer);
+        return &m_cylinders.back();
+    }
+
+    XrCompositionLayerEquirectKHR* CompositionHelper::CreateEquirectLayer(XrSwapchain swapchain, XrSpace space, 
+                                                                          float radius, XrVector2f scale, XrVector2f bias, 
+                                                                          XrPosef pose = Pose::Identity)
+    {
+        XrCompositionLayerEquirectKHR layer{XR_TYPE_COMPOSITION_LAYER_EQUIRECT_KHR};
+        layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        layer.pose = pose;
+        layer.space = space;
+        layer.subImage = MakeDefaultSubImage(swapchain);
+
+        layer.radius = radius;
+        layer.scale = scale;
+        layer.bias = bias;
+
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_equirects.push_back(layer);
+        return &m_equirects.back();
+    }
+
+    XrCompositionLayerEquirect2KHR* CompositionHelper::CreateEquirect2Layer(XrSwapchain swapchain, XrSpace space, 
+                                                                            float radius, float centralHorizontalAngle, float upperVerticalAngle, float lowerVerticalAngle, 
+                                                                            XrPosef pose = Pose::Identity)
+    {
+        XrCompositionLayerEquirect2KHR layer{XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR};
+        layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        layer.pose = pose;
+        layer.space = space;
+        layer.subImage = MakeDefaultSubImage(swapchain);
+
+        layer.radius = radius;
+        layer.centralHorizontalAngle = centralHorizontalAngle;
+        layer.upperVerticalAngle = upperVerticalAngle;
+        layer.lowerVerticalAngle = lowerVerticalAngle;
+
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_equirect2s.push_back(layer);
+        return &m_equirect2s.back();
+    }
+
+    XrCompositionLayerCubeKHR* CompositionHelper::CreateCubeLayer(XrSwapchain swapchain, XrSpace space, XrPosef pose = Pose::Identity)
+    {
+        XrCompositionLayerCubeKHR layer{XR_TYPE_COMPOSITION_LAYER_CUBE_KHR};
+        layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
+        layer.orientation = pose.orientation;
+        layer.space = space;
+        layer.imageArrayIndex = 0;
+        layer.swapchain = swapchain;
+
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_cubes.push_back(layer);
+        return &m_cubes.back();
+    }
+                                                                          
 
     XrCompositionLayerProjection* CompositionHelper::CreateProjectionLayer(XrSpace space)
     {

@@ -679,7 +679,7 @@ namespace Conformance
         // ISwapchainImageData * EnumerateSwapchainImageData(XrSwapchain colorSwapchain,
         //                                                                  const XrSwapchainCreateInfo& swapchainCreateInfo) override;
 
-        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImageBase, uint32_t arraySlice, const RGBAImage& image) override;
+        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImageBase, uint32_t arraySlice, const RGBAImage& image, int faceId) override;
 
         void SetViewportAndScissor(const VkRect2D& rect);
 
@@ -1843,7 +1843,7 @@ namespace Conformance
     }
 
     void VulkanGraphicsPlugin::CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImageBase, uint32_t arraySlice,
-                                             const RGBAImage& image)
+                                             const RGBAImage& image, int faceId)
     {
         const XrSwapchainImageVulkanKHR* swapchainImageVk = reinterpret_cast<const XrSwapchainImageVulkanKHR*>(swapchainImageBase);
 
@@ -1851,6 +1851,13 @@ namespace Conformance
         uint32_t imageIndex;
 
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(swapchainImageBase);
+
+        if(swapchainData->faceCount() == 6){
+            if(faceId < 0 || faceId >= 6) {
+                throw std::runtime_error("Invalid face id"); 
+            }
+            arraySlice = arraySlice * 6 + faceId;
+        }
 
         uint32_t w = image.width;
         uint32_t h = image.height;

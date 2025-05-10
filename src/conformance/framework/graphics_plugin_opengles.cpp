@@ -270,7 +270,7 @@ namespace Conformance
 
         const XrBaseInStructure* GetGraphicsBinding() const override;
 
-        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image) override;
+        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId) override;
 
         std::string GetImageFormatName(int64_t imageFormat) const override;
 
@@ -391,7 +391,7 @@ namespace Conformance
     }
 
     void OpenGLESGraphicsPlugin::CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice,
-                                               const RGBAImage& image)
+                                               const RGBAImage& image, int faceId)
     {
         OpenGLESSwapchainImageData* swapchainData;
         uint32_t imageIndex;
@@ -407,19 +407,29 @@ namespace Conformance
         GLuint width = swapchainData->Width();
         GLuint height = swapchainData->Height();
         GLenum target = isArray ? GL_TEXTURE_2D_ARRAY : GL_TEXTURE_2D;
+        GLenum faceTarget = target;
+
+        uint32_t faceCount = swapchainData->FaceCount();
+        if(faceCount == 6) {
+            if (faceId < 0 || faceId >= 6) {
+                throw std::runtime_error("Invalid face id");
+            }
+            target = isArray? GL_TEXTURE_CUBE_MAP_ARRAY : GL_TEXTURE_CUBE_MAP;
+            faceTarget = GL_TEXTURE_CUBE_MAP_POSITIVE_X + faceId;
+        }
 
         const uint32_t img = swapchainData->GetTypedImage(imageIndex).image;
         GL(glBindTexture(target, img));
         if (isArray) {
             for (GLuint y = 0; y < height; ++y) {
                 const void* pixels = &image.pixels[(height - 1 - y) * width];
-                GL(glTexSubImage3D(target, 0, 0, y, arraySlice, width, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixels));
+                GL(glTexSubImage3D(faceTarget, 0, 0, y, arraySlice, width, 1, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixels));
             }
         }
         else {
             for (GLuint y = 0; y < height; ++y) {
                 const void* pixels = &image.pixels[(height - 1 - y) * width];
-                GL(glTexSubImage2D(target, 0, 0, y, width, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixels));
+                GL(glTexSubImage2D(faceTarget, 0, 0, y, width, 1, GL_RGBA, GL_UNSIGNED_BYTE, pixels));
             }
         }
         GL(glBindTexture(target, 0));

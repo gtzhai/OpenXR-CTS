@@ -245,6 +245,11 @@ namespace Conformance
             return m_runtimeDepthHandling != nullptr;
         }
 
+        uint32_t FaceCount() const noexcept
+        {
+            return m_colorInfo.faceCount;
+        }
+
         /// Get the depth swapchain image as a derived type, using the index of the corresponding color swapchain image.
         SwapchainImageDerivedType GetDepthImageForColorIndex(uint32_t colorImageIndex);
 

@@ -281,11 +281,13 @@ namespace Conformance
         ///
         /// @note Do not destroy this directly using OpenXR functions: use @ref DestroySwapchain instead.
         XrSwapchain CreateStaticSwapchainSolidColor(const XrColor4f& color);
+        XrSwapchain CreateCubeStaticSwapchainSolidColor(const XrColor4f* color);
 
         /// Create and return a static swapchain that has had an RGBAImage copied to it: specialization of @ref CreateSwapchain
         ///
         /// @note Do not destroy this directly using OpenXR functions: use @ref DestroySwapchain instead.
         XrSwapchain CreateStaticSwapchainImage(const RGBAImage& rgbaImage);
+        XrSwapchain CreateCubeStaticSwapchainImage(const RGBAImage* rgbaImage);
 
         /// For a swapchain created using @ref CreateSwapchain or one of its specialized versions, return a `XrSwapchainSubImage` structure
         /// populated with the full sub-image as default (start at 0, 0, full width and height) and the provided
@@ -303,6 +305,49 @@ namespace Conformance
         /// @param width The width for the quad layer, goes directly to XrCompositionLayerQuad::size.width
         /// @param pose The pose of the quad in @p space
         XrCompositionLayerQuad* CreateQuadLayer(XrSwapchain swapchain, XrSpace space, float width, XrPosef pose = Pose::Identity);
+
+        /// Create a cylinder layer structure owned by this object, displaying @p swapchain with @p width
+        /// attached to the provided @p space with optional @p pose
+        ///
+        /// @param swapchain A swapchain created with @ref CreateSwapchain or a specialization of it.
+        /// @param space The space to attach the layer to.
+        /// @param radius The cylinder radius
+        /// @param centralAngle The cylinder arc angle
+        /// @param aspectRatio The cylinder aspect ratio 
+        /// @param pose The pose of the in @p space
+        XrCompositionLayerCylinderKHR* CreateCylinderLayer(XrSwapchain swapchain, XrSpace space,  float radius, float centralAngle, float aspectRatio, XrPosef pose = Pose::Identity);
+            
+
+        /// Create a Equirect layer structure owned by this object, displaying @p swapchain with @p width
+        /// attached to the provided @p space with optional @p pose
+        ///
+        /// @param swapchain A swapchain created with @ref CreateSwapchain or a specialization of it.
+        /// @param space The space to attach the layer to.
+        /// @param radius The sphere radius
+        /// @param scale The scaling factor of a spherical region
+        /// @param bias The bias factor of a spherical region
+        /// @param pose The pose of the in @p space
+        XrCompositionLayerEquirectKHR* CreateEquirectLayer(XrSwapchain swapchain, XrSpace space, float radius, XrVector2f scale, XrVector2f bias, XrPosef pose = Pose::Identity);
+
+        /// Create a Equirect2 layer structure owned by this object, displaying @p swapchain with @p width
+        /// attached to the provided @p space with optional @p pose
+        ///
+        /// @param swapchain A swapchain created with @ref CreateSwapchain or a specialization of it.
+        /// @param space The space to attach the layer to.
+        /// @param radius The sphere radius
+        /// @param centralHorizontalAngle The central azimuth angle
+        /// @param upperVerticalAngle spherical postive elevation angle
+        /// @param lowerVerticalAngle spherical negtive elevation angle
+        /// @param pose The pose of the in @p space
+        XrCompositionLayerEquirect2KHR* CreateEquirect2Layer(XrSwapchain swapchain, XrSpace space, float radius, float centralHorizontalAngle, float upperVerticalAngle, float lowerVerticalAngle, XrPosef pose = Pose::Identity);
+
+        /// Create a Cube layer structure owned by this object, displaying @p swapchain with @p width
+        /// attached to the provided @p space with optional @p pose
+        ///
+        /// @param swapchain A swapchain created with @ref CreateSwapchain or a specialization of it.
+        /// @param space The space to attach the layer to.
+        /// @param pose The pose of the in @p space
+        XrCompositionLayerCubeKHR* CreateCubeLayer(XrSwapchain swapchain, XrSpace space, XrPosef pose = Pose::Identity);
 
         /// Create a projection layer structure (with projection view) owned by this object, attached to the provided @p space.
         ///
@@ -339,6 +384,11 @@ namespace Conformance
         std::list<std::vector<XrCompositionLayerProjectionView>> m_projectionViews;
         std::list<XrCompositionLayerQuad> m_quads;
 
+        std::list<XrCompositionLayerCylinderKHR> m_cylinders;
+        std::list<XrCompositionLayerEquirectKHR> m_equirects;
+        std::list<XrCompositionLayerEquirect2KHR> m_equirect2s;
+        std::list<XrCompositionLayerCubeKHR> m_cubes;
+        
         std::map<XrSwapchain, XrSwapchainCreateInfo> m_createdSwapchains;
         std::map<XrSwapchain, ISwapchainImageData*> m_swapchainImages;
         std::vector<XrSpace> m_spaces;

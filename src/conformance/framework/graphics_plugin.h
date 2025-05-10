@@ -286,7 +286,7 @@ namespace Conformance
         virtual const XrBaseInStructure* GetGraphicsBinding() const = 0;
 
         virtual void CopyRGBAImage(const XrSwapchainImageBaseHeader* /*swapchainImage*/, uint32_t /*arraySlice*/,
-                                   const RGBAImage& /*image*/) = 0;
+                                   const RGBAImage& /*image*/, int /*faceId*/) = 0;
 
         /// Returns a name for an image format. Returns "unknown" for unknown formats.
         virtual std::string GetImageFormatName(int64_t /*imageFormat*/) const = 0;

@@ -398,7 +398,7 @@ namespace Conformance
 
         const XrBaseInStructure* GetGraphicsBinding() const override;
 
-        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image) override;
+        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId) override;
 
         std::string GetImageFormatName(int64_t imageFormat) const override;
 
@@ -981,7 +981,7 @@ namespace Conformance
         return ret;
     }
 
-    void OpenGLGraphicsPlugin::CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image)
+    void OpenGLGraphicsPlugin::CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId)
     {
         OpenGLSwapchainImageData* swapchainData;
         uint32_t imageIndex;

@@ -327,7 +327,7 @@ namespace Conformance
 
         const XrBaseInStructure* GetGraphicsBinding() const override;
 
-        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image) override;
+        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId) override;
 
         std::string GetImageFormatName(int64_t imageFormat) const override;
 
@@ -606,7 +606,7 @@ namespace Conformance
         d3d12Device.Reset();
     }
 
-    void D3D12GraphicsPlugin::CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image)
+    void D3D12GraphicsPlugin::CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId)
     {
         D3D12_HEAP_PROPERTIES heapProp{};
         heapProp.Type = D3D12_HEAP_TYPE_DEFAULT;

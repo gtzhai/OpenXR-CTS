@@ -226,7 +226,7 @@ namespace Conformance
 
         const XrBaseInStructure* GetGraphicsBinding() const override;
 
-        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image) override;
+        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId) override;
 
         std::string GetImageFormatName(int64_t imageFormat) const override;
 
@@ -411,7 +411,7 @@ namespace Conformance
         return nullptr;
     }
 
-    void MetalGraphicsPlugin::CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image)
+    void MetalGraphicsPlugin::CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId)
     {
         MTL::Texture* texture = (MTL::Texture*)(reinterpret_cast<const XrSwapchainImageMetalKHR*>(swapchainImage)->texture);
         MTL::Region region(0, 0, image.width, image.height);

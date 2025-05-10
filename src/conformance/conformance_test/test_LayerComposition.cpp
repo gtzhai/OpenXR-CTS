@@ -1465,6 +1465,19 @@ namespace Conformance
             }
         }
 
+        const XrSwapchain graySwapchain = compositionHelper.CreateStaticSwapchainSolidColor(Colors::Gray);
+        const XrSwapchain blueSwapchain = compositionHelper.CreateStaticSwapchainSolidColor(Colors::Blue);
+        const XrSwapchain greenSwapchain = compositionHelper.CreateStaticSwapchainSolidColor(Colors::Green);
+
+        const XrSwapchain cubeSwapchain = compositionHelper.CreateCubeStaticSwapchainSolidColor(Colors::UniqueColors.data());
+
+        const XrQuaternionf identRot = Quat::FromAxisAngle({0, 1, 0}, DegToRad(0));
+        interactiveLayerManager.AddLayer(compositionHelper.CreateQuadLayer(blueSwapchain, localSpace, 1.0f, XrPosef{identRot, {0, -4, -2}}));
+        interactiveLayerManager.AddLayer(compositionHelper.CreateCylinderLayer(greenSwapchain, localSpace, 3.0f, 3.14f, 1.0f, XrPosef{identRot, {0, 4, -2}}));
+        float PI = 3.141592653;
+        interactiveLayerManager.AddLayer(compositionHelper.CreateEquirect2Layer(graySwapchain, localSpace, 3.0f, 2*PI, PI/2, -PI/2, XrPosef{identRot, {0, 0, -2}}));
+        interactiveLayerManager.AddBackgroundLayer(compositionHelper.CreateCubeLayer(cubeSwapchain, localSpace, XrPosef{identRot, {0, 0, 0}}));
+
         // Alternate which cube should be in front. Rotate every cube in the second layer to tell them apart
         const std::vector<Cube> cubes[LayerCount] = {
             {Cube::Make({-1, 0, -2.5}), Cube::Make({1, 0, -2}), Cube::Make({0, -1, -2.5}), Cube::Make({0, 1, -2})},

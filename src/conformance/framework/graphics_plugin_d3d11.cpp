@@ -176,7 +176,7 @@ namespace Conformance
 
         const XrBaseInStructure* GetGraphicsBinding() const override;
 
-        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image) override;
+        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId) override;
 
         std::string GetImageFormatName(int64_t imageFormat) const override;
 
@@ -451,7 +451,7 @@ namespace Conformance
         return nullptr;
     }
 
-    void D3D11GraphicsPlugin::CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image)
+    void D3D11GraphicsPlugin::CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId)
     {
         D3D11_TEXTURE2D_DESC rgbaImageDesc{};
         rgbaImageDesc.Width = image.width;
