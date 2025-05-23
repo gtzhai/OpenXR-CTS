@@ -110,16 +110,17 @@ namespace Conformance
     struct Cube
     {
         static inline Cube Make(XrVector3f position, float scale = 0.25f, XrQuaternionf orientation = {0, 0, 0, 1},
-                                XrColor4f tintColor = {0, 0, 0, 0})
+                                XrColor4f tintColor = {0, 0, 0, 0}, float alpha = 1.0f)
         {
-            return Cube{/* pose */ {orientation, position}, /* scale: */ {scale, scale, scale}, tintColor};
+            return Cube{/* pose */ {orientation, position}, /* scale: */ {scale, scale, scale}, tintColor, alpha};
         }
 
-        Cube(XrPosef pose, XrVector3f scale, XrColor4f tintColor = {0, 0, 0, 0}) : params(pose, scale), tintColor(tintColor)
+        Cube(XrPosef pose, XrVector3f scale, XrColor4f tintColor = {0, 0, 0, 0}, float alpha = 1.0f) : params(pose, scale), tintColor(tintColor), alpha(alpha)
         {
         }
         DrawableParams params;
         XrColor4f tintColor;
+        float alpha = 1.0f;
     };
 
     namespace detail
@@ -143,10 +144,11 @@ namespace Conformance
         MeshHandle handle;
         DrawableParams params;
         XrColor4f tintColor;
+        float alpha = 1.0f;
 
         MeshDrawable(MeshHandle handle, XrPosef pose = Pose::Identity, XrVector3f scale = {1.0, 1.0, 1.0},
-                     XrColor4f tintColor = {0, 0, 0, 0})
-            : handle(handle), params(pose, scale), tintColor(tintColor)
+                     XrColor4f tintColor = {0, 0, 0, 0}, float alpha = 1.0f)
+            : handle(handle), params(pose, scale), tintColor(tintColor), alpha(alpha)
         {
         }
     };
@@ -286,7 +288,7 @@ namespace Conformance
         virtual const XrBaseInStructure* GetGraphicsBinding() const = 0;
 
         virtual void CopyRGBAImage(const XrSwapchainImageBaseHeader* /*swapchainImage*/, uint32_t /*arraySlice*/,
-                                   const RGBAImage& /*image*/, int /*faceId*/) = 0;
+                                   const RGBAImage& /*image*/, int faceId = -1) = 0;
 
         /// Returns a name for an image format. Returns "unknown" for unknown formats.
         virtual std::string GetImageFormatName(int64_t /*imageFormat*/) const = 0;

@@ -621,14 +621,13 @@ namespace Conformance
         // The swapchain format must be R8G8B8A8 UNORM to match the RGBAImage format.
         const int64_t format = GetGlobalData().graphicsPlugin->GetSRGBA8Format();
         auto swapchainCreateInfo =
-            DefaultColorSwapchainCreateInfo(rgbaImage.width, rgbaImage.height, XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT, format);
+            DefaultColorSwapchainCreateInfo(rgbaImage[0].width, rgbaImage[0].height, XR_SWAPCHAIN_CREATE_STATIC_IMAGE_BIT, format);
         swapchainCreateInfo.faceCount = 6;
         swapchainCreateInfo.usageFlags |= XR_SWAPCHAIN_USAGE_TRANSFER_DST_BIT;
         const XrSwapchain swapchain = CreateSwapchain(swapchainCreateInfo);
 
-        RGBAImage srgbImage[6];
+        RGBAImage srgbImage[6] = {rgbaImage[0], rgbaImage[1], rgbaImage[2],rgbaImage[3], rgbaImage[4], rgbaImage[5]};
         for(int i=0; i<6; i++){
-            srgbImage[i] = rgbaImage[i];
             if (!rgbaImage[i].isSrgb)
                 srgbImage[i].ConvertToSRGB();
         }
@@ -644,10 +643,9 @@ namespace Conformance
     XrSwapchain CompositionHelper::CreateCubeStaticSwapchainSolidColor(const XrColor4f* color)
     {
         // Avoid using a 1x1 image here since runtimes may do special processing near texture edges.
-        RGBAImage image[6];
+        RGBAImage image[6] = {RGBAImage(256, 256), RGBAImage(256, 256), RGBAImage(256, 256), RGBAImage(256, 256), RGBAImage(256, 256), RGBAImage(256, 256)};
 
         for(int i=0; i<6; i++){
-            image[i] = RGBAImage(256, 256);
             image[i].DrawRect(0, 0, 256, 256, color[i]);
         }
 
@@ -688,7 +686,7 @@ namespace Conformance
 
     XrCompositionLayerCylinderKHR* CompositionHelper::CreateCylinderLayer(XrSwapchain swapchain, XrSpace space, 
                                                        float radius, float centralAngle, float aspectRatio, 
-                                                       XrPosef pose = Pose::Identity)
+                                                       XrPosef pose)
     {
         XrCompositionLayerCylinderKHR layer{XR_TYPE_COMPOSITION_LAYER_CYLINDER_KHR};
         layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
@@ -707,7 +705,7 @@ namespace Conformance
 
     XrCompositionLayerEquirectKHR* CompositionHelper::CreateEquirectLayer(XrSwapchain swapchain, XrSpace space, 
                                                                           float radius, XrVector2f scale, XrVector2f bias, 
-                                                                          XrPosef pose = Pose::Identity)
+                                                                          XrPosef pose)
     {
         XrCompositionLayerEquirectKHR layer{XR_TYPE_COMPOSITION_LAYER_EQUIRECT_KHR};
         layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
@@ -726,7 +724,7 @@ namespace Conformance
 
     XrCompositionLayerEquirect2KHR* CompositionHelper::CreateEquirect2Layer(XrSwapchain swapchain, XrSpace space, 
                                                                             float radius, float centralHorizontalAngle, float upperVerticalAngle, float lowerVerticalAngle, 
-                                                                            XrPosef pose = Pose::Identity)
+                                                                            XrPosef pose)
     {
         XrCompositionLayerEquirect2KHR layer{XR_TYPE_COMPOSITION_LAYER_EQUIRECT2_KHR};
         layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;
@@ -744,7 +742,7 @@ namespace Conformance
         return &m_equirect2s.back();
     }
 
-    XrCompositionLayerCubeKHR* CompositionHelper::CreateCubeLayer(XrSwapchain swapchain, XrSpace space, XrPosef pose = Pose::Identity)
+    XrCompositionLayerCubeKHR* CompositionHelper::CreateCubeLayer(XrSwapchain swapchain, XrSpace space, XrPosef pose)
     {
         XrCompositionLayerCubeKHR layer{XR_TYPE_COMPOSITION_LAYER_CUBE_KHR};
         layer.eyeVisibility = XR_EYE_VISIBILITY_BOTH;

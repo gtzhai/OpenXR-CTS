@@ -91,6 +91,7 @@ namespace Conformance
     {
         mat4 mvp;
         vec4 tintColor;
+        float alpha;
     } ubuf;
 
     layout (location = 0) in vec3 Position;
@@ -105,7 +106,7 @@ namespace Conformance
     void main()
     {
         oColor.rgb = mix(Color.rgb, ubuf.tintColor.rgb, ubuf.tintColor.a);
-        oColor.a  = 1.0;
+        oColor.a  = ubuf.alpha;
         gl_Position = ubuf.mvp * vec4(Position, 1);
     }
 )_";
@@ -679,7 +680,7 @@ namespace Conformance
         // ISwapchainImageData * EnumerateSwapchainImageData(XrSwapchain colorSwapchain,
         //                                                                  const XrSwapchainCreateInfo& swapchainCreateInfo) override;
 
-        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImageBase, uint32_t arraySlice, const RGBAImage& image, int faceId) override;
+        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImageBase, uint32_t arraySlice, const RGBAImage& image, int faceId = -1) override;
 
         void SetViewportAndScissor(const VkRect2D& rect);
 
@@ -1852,7 +1853,7 @@ namespace Conformance
 
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(swapchainImageBase);
 
-        if(swapchainData->faceCount() == 6){
+        if(swapchainData->FaceCount() == 6){
             if(faceId < 0 || faceId >= 6) {
                 throw std::runtime_error("Invalid face id"); 
             }
@@ -2178,6 +2179,7 @@ namespace Conformance
             VulkanUniformBuffer ubuf;
             ubuf.tintColor = mesh.tintColor;
             ubuf.mvp = vp * model;
+            ubuf.alpha = mesh.alpha;
             vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
 
             CHECKPOINT();
@@ -2190,7 +2192,7 @@ namespace Conformance
 
         // Render each cube
         for (const Cube& cube : params.cubes) {
-            drawMesh(MeshDrawable{m_cubeMesh, cube.params.pose, cube.params.scale, cube.tintColor});
+            drawMesh(MeshDrawable{m_cubeMesh, cube.params.pose, cube.params.scale, cube.tintColor, cube.alpha});
         }
 
         // Render each mesh

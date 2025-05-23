@@ -86,11 +86,13 @@ namespace Conformance
     static const char* FragmentShaderGlsl = R"_(
     #version 320 es
 
+    uniform float alpha;
+
     in lowp vec3 PSVertexColor;
     out lowp vec4 FragColor;
 
     void main() {
-       FragColor = vec4(PSVertexColor, 1);
+       FragColor = vec4(PSVertexColor, alpha);
     }
     )_";
 
@@ -270,7 +272,7 @@ namespace Conformance
 
         const XrBaseInStructure* GetGraphicsBinding() const override;
 
-        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId) override;
+        void CopyRGBAImage(const XrSwapchainImageBaseHeader* swapchainImage, uint32_t arraySlice, const RGBAImage& image, int faceId = -1) override;
 
         std::string GetImageFormatName(int64_t imageFormat) const override;
 
@@ -328,6 +330,7 @@ namespace Conformance
         GLuint m_program{0};
         GLint m_modelViewProjectionUniformLocation{0};
         GLint m_tintColorUniformLocation{0};
+        GLint m_alphaUniformLocation{0};
         GLint m_vertexAttribCoords{0};
         GLint m_vertexAttribColor{0};
         MeshHandle m_cubeMesh{};
@@ -578,6 +581,7 @@ namespace Conformance
 
         m_modelViewProjectionUniformLocation = glGetUniformLocation(m_program, "ModelViewProjection");
         m_tintColorUniformLocation = glGetUniformLocation(m_program, "tintColor");
+        m_alphaUniformLocation = glGetUniformLocation(m_program, "alpha");
 
         m_vertexAttribCoords = glGetAttribLocation(m_program, "VertexPos");
         m_vertexAttribColor = glGetAttribLocation(m_program, "VertexColor");
@@ -1331,6 +1335,7 @@ namespace Conformance
             XrMatrix4x4f mvp = vp * model;
             GL(glUniformMatrix4fv(m_modelViewProjectionUniformLocation, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&mvp)));
             GL(glUniform4fv(m_tintColorUniformLocation, 1, reinterpret_cast<const GLfloat*>(&mesh.tintColor)));
+            GL(glUniform1f(m_alphaUniformLocation, mesh.alpha));
 
             // Draw the mesh.
             GL(glDrawElements(GL_TRIANGLES, glMesh.m_numIndices, GL_UNSIGNED_SHORT, nullptr));
@@ -1338,7 +1343,7 @@ namespace Conformance
 
         // Render each cube
         for (const Cube& cube : params.cubes) {
-            drawMesh(MeshDrawable{m_cubeMesh, cube.params.pose, cube.params.scale, cube.tintColor});
+            drawMesh(MeshDrawable{m_cubeMesh, cube.params.pose, cube.params.scale, cube.tintColor, cube.alpha});
         }
 
         // Render each mesh

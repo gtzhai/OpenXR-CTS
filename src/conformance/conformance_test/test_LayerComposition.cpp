@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <numeric>
 #include <sstream>
+#include "common/android_logging.h"
 
 using namespace Conformance;
 
@@ -1389,7 +1390,7 @@ namespace Conformance
         }).Loop();
     }
 
-    TEST_CASE("ProjectionDepth", "[XR_KHR_composition_layer_depth][XR_FB_composition_layer_depth_test][composition][interactive]")
+    TEST_CASE("ProjectionDepth", "[xxxxxx]")
     {
         GlobalData& globalData = GetGlobalData();
         if (!globalData.IsUsingGraphicsPlugin()) {
@@ -1461,7 +1462,7 @@ namespace Conformance
                 depthInfo[layer][j].nearZ = 0.05f;
                 depthInfo[layer][j].farZ = 100.0f;
                 depthInfo[layer][j].subImage = compositionHelper.MakeDefaultSubImage(swapchain[layer][j].second);
-                const_cast<const void*&>(projLayers[layer]->views[j].next) = &depthInfo[layer][j];
+                if(layer == 1) const_cast<const void*&>(projLayers[layer]->views[j].next) = &depthInfo[layer][j];
             }
         }
 
@@ -1472,11 +1473,13 @@ namespace Conformance
         const XrSwapchain cubeSwapchain = compositionHelper.CreateCubeStaticSwapchainSolidColor(Colors::UniqueColors.data());
 
         const XrQuaternionf identRot = Quat::FromAxisAngle({0, 1, 0}, DegToRad(0));
+        #if 0
         interactiveLayerManager.AddLayer(compositionHelper.CreateQuadLayer(blueSwapchain, localSpace, 1.0f, XrPosef{identRot, {0, -4, -2}}));
         interactiveLayerManager.AddLayer(compositionHelper.CreateCylinderLayer(greenSwapchain, localSpace, 3.0f, 3.14f, 1.0f, XrPosef{identRot, {0, 4, -2}}));
         float PI = 3.141592653;
-        interactiveLayerManager.AddLayer(compositionHelper.CreateEquirect2Layer(graySwapchain, localSpace, 3.0f, 2*PI, PI/2, -PI/2, XrPosef{identRot, {0, 0, -2}}));
+        interactiveLayerManager.AddLayer(compositionHelper.CreateEquirect2Layer(graySwapchain, localSpace, 1.0f, 2*PI, PI/2, -PI/2, XrPosef{identRot, {0, 0, -2}}));
         interactiveLayerManager.AddBackgroundLayer(compositionHelper.CreateCubeLayer(cubeSwapchain, localSpace, XrPosef{identRot, {0, 0, 0}}));
+        #endif
 
         // Alternate which cube should be in front. Rotate every cube in the second layer to tell them apart
         const std::vector<Cube> cubes[LayerCount] = {

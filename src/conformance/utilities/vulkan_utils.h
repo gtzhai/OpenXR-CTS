@@ -1048,6 +1048,7 @@ namespace Conformance
     {
         XrMatrix4x4f mvp;
         XrColor4f tintColor;
+        float alpha;
     };
 
     // Simple vertex MVP xform, tint color & color fragment shader layout
