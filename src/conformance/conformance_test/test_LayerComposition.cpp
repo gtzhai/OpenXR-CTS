@@ -1484,8 +1484,8 @@ namespace Conformance
         // Alternate which cube should be in front. Rotate every cube in the second layer to tell them apart
         const std::vector<Cube> cubes[LayerCount] = {
             {Cube::Make({-1, 0, -2.5}), Cube::Make({1, 0, -2}), Cube::Make({0, -1, -2.5}), Cube::Make({0, 1, -2})},
-            {Cube::Make({-1, 0, -2}, 0.25f, {0, 1, 0, 0}), Cube::Make({1, 0, -2.5}, 0.25f, {0, 1, 0, 0}),
-             Cube::Make({0, -1, -2}, 0.25f, {1, 0, 0, 0}), Cube::Make({0, 1, -2.5}, 0.25f, {1, 0, 0, 0})}};
+            {Cube::Make({-1, 0, -2}, 0.25f, {0, 1, 0, 0}, {0, 0, 0, 0}, 0.5f), Cube::Make({1, 0, -2.5}, 0.25f, {0, 1, 0, 0}, {0, 0, 0, 0}, 0.5f),
+             Cube::Make({0, -1, -2}, 0.25f, {1, 0, 0, 0}, {0, 0, 0, 0}, 0.5f), Cube::Make({0, 1, -2.5}, 0.25f, {1, 0, 0, 0}, {0, 0, 0, 0}, 0.5f)}};
 
         auto updateLayers = [&](const XrFrameState& frameState) {
             auto viewData = compositionHelper.LocateViews(localSpace, frameState.predictedDisplayTime);
