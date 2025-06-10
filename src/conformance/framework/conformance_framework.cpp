@@ -478,6 +478,11 @@ namespace Conformance
         return IsInstanceExtensionEnabled(XR_EXT_CONFORMANCE_AUTOMATION_EXTENSION_NAME);
     }
 
+    bool GlobalData::IsUsingMSAA() const
+    {
+        return isUsingMSAA;
+    }
+
     void GlobalData::PushSwapchainFormat(int64_t format, const std::string& name)
     {
         std::unique_lock<std::recursive_mutex> lock(dataMutex);

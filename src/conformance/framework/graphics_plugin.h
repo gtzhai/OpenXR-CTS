@@ -100,8 +100,13 @@ namespace Conformance
     {
         XrPosef pose = Pose::Identity;
         XrVector3f scale = {1.f, 1.f, 1.f};
+        XrPosef posePrev = Pose::Identity;
+        XrVector3f scalePrev = {1.f, 1.f, 1.f};
 
-        DrawableParams(XrPosef pose_, XrVector3f scale_) : pose(pose_), scale(scale_)
+        DrawableParams(XrPosef pose_, XrVector3f scale_) : pose(pose_), scale(scale_), posePrev(pose_), scalePrev(scale_)
+        {
+        }
+        DrawableParams(XrPosef pose_, XrVector3f scale_, XrPosef posePrev_, XrVector3f scalePrev_) : pose(pose_), scale(scale_), posePrev(posePrev_), scalePrev(scalePrev_)
         {
         }
     };
@@ -349,7 +354,8 @@ namespace Conformance
         /// allocated by the plugin.
         virtual ISwapchainImageData*
         AllocateSwapchainImageDataWithDepthSwapchain(size_t size, const XrSwapchainCreateInfo& colorSwapchainCreateInfo,
-                                                     XrSwapchain depthSwapchain, const XrSwapchainCreateInfo& depthSwapchainCreateInfo) = 0;
+                                                     XrSwapchain depthSwapchain, const XrSwapchainCreateInfo& depthSwapchainCreateInfo, bool isMotionVector = false) = 0;
+
 
         /// Clears a slice to an arbitrary color. Must be called before rendering to the image, since it may also reset internal state.
         virtual void ClearImageSlice(const XrSwapchainImageBaseHeader* colorSwapchainImage, uint32_t imageArrayIndex, XrColor4f color) = 0;
@@ -405,7 +411,7 @@ namespace Conformance
 
         /// Render a list of drawables to a swapchain image. ClearImageSlice must be called first to clear internal state.
         virtual void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* colorSwapchainImage,
-                                const RenderParams& params) = 0;
+                                const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr) = 0;
 
         /// Clears a slice to an arbitrary color with a compute shader. Can only be used with XR_SWAPCHAIN_USAGE_UNORDERED_ACCESS_BIT.
         /// @todo The actual rendering is only implemented for Vulkan. On OpenGL (ES) this is a noop, on D3D11/D3D12 it checks whether the appropriate flags are set.

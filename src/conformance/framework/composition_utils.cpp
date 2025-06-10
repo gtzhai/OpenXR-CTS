@@ -565,6 +565,41 @@ namespace Conformance
         return std::make_pair(swapchain, depthSwapchain);
     }
 
+    std::pair<XrSwapchain, XrSwapchain> CompositionHelper::CreateMotionVectorSwapchainWithDepth(XrExtent2Di* widthHeight)
+    {
+        if (!GetGlobalData().IsUsingGraphicsPlugin()) {
+            return std::make_pair(XR_NULL_HANDLE, XR_NULL_HANDLE);
+        }
+
+        XrSwapchainCreateInfo createInfo;
+        XrSwapchainCreateInfo depthCreateInfo;
+
+        XrSwapchain swapchain;
+        XRC_CHECK_THROW_XRCMD(CreateMotionVectorSwapchain(m_session,GetGlobalData().graphicsPlugin.get(), &swapchain, widthHeight, 1, &createInfo));
+
+        XrSwapchain depthSwapchain;
+        XRC_CHECK_THROW_XRCMD(CreateDepthSwapchain(m_session, GetGlobalData().graphicsPlugin.get(), &depthSwapchain, widthHeight, 1, &depthCreateInfo));
+
+
+        std::lock_guard<std::mutex> lock(m_mutex);
+
+        // Cache the swapchain create info and image structs.
+        m_createdSwapchains.insert({swapchain, createInfo});
+        m_createdSwapchains.insert({depthSwapchain, depthCreateInfo});
+
+        // Cache the swapchain image structs.
+        uint32_t imageCount;
+        XRC_CHECK_THROW_XRCMD(xrEnumerateSwapchainImages(swapchain, 0, &imageCount, nullptr));
+
+        ISwapchainImageData* swapchainImages = GetGlobalData().graphicsPlugin->AllocateSwapchainImageDataWithDepthSwapchain(
+            imageCount, createInfo, depthSwapchain, depthCreateInfo, true);
+        XRC_CHECK_THROW_XRCMD(xrEnumerateSwapchainImages(swapchain, imageCount, &imageCount, swapchainImages->GetColorImageArray()));
+        XRC_CHECK_THROW_XRCMD(xrEnumerateSwapchainImages(depthSwapchain, imageCount, &imageCount, swapchainImages->GetDepthImageArray()));
+        m_swapchainImages[swapchain] = swapchainImages;
+
+        return std::make_pair(swapchain, depthSwapchain);
+    }
+
     void CompositionHelper::DestroySwapchain(XrSwapchain swapchain)
     {
         // Drop all associated resources.

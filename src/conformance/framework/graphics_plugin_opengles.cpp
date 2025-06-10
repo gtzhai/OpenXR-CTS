@@ -66,8 +66,7 @@
 namespace Conformance
 {
     struct IPlatformPlugin;
-    static const char* VertexShaderGlsl = R"_(
-    #version 320 es
+    static const char* VertexShaderGlsl = R"_(#version 300 es
 
     in vec3 VertexPos;
     in vec3 VertexColor;
@@ -83,8 +82,7 @@ namespace Conformance
     }
     )_";
 
-    static const char* FragmentShaderGlsl = R"_(
-    #version 320 es
+    static const char* FragmentShaderGlsl = R"_(#version 300 es
 
     uniform float alpha;
 
@@ -93,6 +91,34 @@ namespace Conformance
 
     void main() {
        FragColor = vec4(PSVertexColor, alpha);
+    }
+    )_";
+
+    static const char* VertexShaderMotionVectorGlsl =R"_(#version 300 es
+    in vec3 VertexPos;
+    in vec4 vertexColor;
+    uniform mat4 viewProjectionMatrix;
+    uniform mat4 prevViewProjectionMatrix;
+    uniform mat4 modelMatrix;
+    uniform mat4 prevModelMatrix;
+    out highp vec4 clipPos;
+    out highp vec4 prevClipPos;
+    void main()
+    {
+     clipPos = viewProjectionMatrix * ( modelMatrix * vec4( VertexPos, 1.0 ) );
+     prevClipPos = prevViewProjectionMatrix * ( prevModelMatrix * vec4( VertexPos, 1.0 ) );
+     gl_Position = clipPos;
+    }
+    )_";
+
+    static const char* FragmentShaderMotionVectorGlsl = R"_(#version 300 es
+    in highp vec4 clipPos;
+    in highp vec4 prevClipPos;
+    out highp vec4 outColor;
+    void main()
+    {
+     highp vec4 motionVector = ( clipPos / clipPos.w - prevClipPos / prevClipPos.w ); 
+     outColor = motionVector;
     }
     )_";
 
@@ -297,7 +323,7 @@ namespace Conformance
         ISwapchainImageData* AllocateSwapchainImageDataWithDepthSwapchain(size_t size,
                                                                           const XrSwapchainCreateInfo& colorSwapchainCreateInfo,
                                                                           XrSwapchain depthSwapchain,
-                                                                          const XrSwapchainCreateInfo& depthSwapchainCreateInfo) override;
+                                                                          const XrSwapchainCreateInfo& depthSwapchainCreateInfo, bool isMotionVector = false) override;
 
         void ClearImageSlice(const XrSwapchainImageBaseHeader* colorSwapchainImage, uint32_t imageArrayIndex, XrColor4f color) override;
 
@@ -309,7 +335,7 @@ namespace Conformance
         Pbr::ModelInstance& GetModelInstance(GLTFModelInstanceHandle handle) override;
 
         void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* colorSwapchainImage,
-                        const RenderParams& params) override;
+                        const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr) override;
         void RenderClearImageSliceCompute(const XrCompositionLayerProjectionView& layerView,
                                           const XrSwapchainImageBaseHeader* colorSwapchainImage, XrColor4f color) override;
 
@@ -327,6 +353,13 @@ namespace Conformance
         XrGraphicsBindingOpenGLESAndroidKHR graphicsBinding = {XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
 
         GLuint m_swapchainFramebuffer{0};
+
+        GLuint m_motionVectorProgram{0};
+        GLint m_mvViewProjectionUniformLocation{0};
+        GLint m_mvPreViewProjectionUniformLocation{0};
+        GLint m_mvModelUniformLocation{0};
+        GLint m_mvPrevModelUniformLocation{0};
+
         GLuint m_program{0};
         GLint m_modelViewProjectionUniformLocation{0};
         GLint m_tintColorUniformLocation{0};
@@ -586,6 +619,33 @@ namespace Conformance
         m_vertexAttribCoords = glGetAttribLocation(m_program, "VertexPos");
         m_vertexAttribColor = glGetAttribLocation(m_program, "VertexColor");
 
+        {
+            GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
+            GL(glShaderSource(vertexShader, 1, &VertexShaderMotionVectorGlsl, nullptr));
+            GL(glCompileShader(vertexShader));
+            CheckShader(vertexShader);
+
+            GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
+            GL(glShaderSource(fragmentShader, 1, &FragmentShaderMotionVectorGlsl, nullptr));
+            GL(glCompileShader(fragmentShader));
+            CheckShader(fragmentShader);
+
+            m_motionVectorProgram = glCreateProgram();
+            GL(glAttachShader(m_motionVectorProgram, vertexShader));
+            GL(glAttachShader(m_motionVectorProgram, fragmentShader));
+            GL(glLinkProgram(m_motionVectorProgram));
+            CheckProgram(m_motionVectorProgram);
+
+            GL(glDeleteShader(vertexShader));
+            GL(glDeleteShader(fragmentShader));
+
+            m_mvViewProjectionUniformLocation = glGetUniformLocation(m_motionVectorProgram, "viewProjectionMatrix");
+            m_mvViewProjectionUniformLocation = glGetUniformLocation(m_motionVectorProgram, "prevViewProjectionMatrix");
+
+            m_mvModelUniformLocation = glGetAttribLocation(m_motionVectorProgram, "modelMatrix");
+            m_mvPrevModelUniformLocation = glGetAttribLocation(m_motionVectorProgram, "prevModelMatrix");
+        }
+
         m_cubeMesh = MakeCubeMesh();
 
         m_pbrResources = std::make_unique<Pbr::GLResources>();
@@ -609,6 +669,10 @@ namespace Conformance
             }
             if (m_program != 0) {
                 GL(glDeleteProgram(m_program));
+            }
+
+            if (m_motionVectorProgram != 0) {
+                GL(glDeleteProgram(m_motionVectorProgram));
             }
 
             m_swapchainImageDataMap.Reset();
@@ -1180,9 +1244,9 @@ namespace Conformance
 
     inline ISwapchainImageData* OpenGLESGraphicsPlugin::AllocateSwapchainImageDataWithDepthSwapchain(
         size_t size, const XrSwapchainCreateInfo& colorSwapchainCreateInfo, XrSwapchain depthSwapchain,
-        const XrSwapchainCreateInfo& depthSwapchainCreateInfo)
+        const XrSwapchainCreateInfo& depthSwapchainCreateInfo, bool isMotionVector)
     {
-
+        (isMotionVector);
         auto typedResult = std::make_unique<OpenGLESSwapchainImageData>(uint32_t(size), colorSwapchainCreateInfo, depthSwapchain,
                                                                         depthSwapchainCreateInfo);
 
@@ -1199,6 +1263,7 @@ namespace Conformance
     {
         OpenGLESSwapchainImageData* swapchainData;
         uint32_t imageIndex;
+        bool msaa_enable = GetGlobalData().IsUsingMSAA();
 
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(colorSwapchainImage);
 
@@ -1210,12 +1275,22 @@ namespace Conformance
         const uint32_t colorTexture = swapchainData->GetTypedImage(imageIndex).image;
         const uint32_t depthTexture = swapchainData->GetDepthImageForColorIndex(imageIndex).image;
         if (isArray) {
+            if(msaa_enable){
+                throw std::runtime_error("NOT support msaa when using seprated layer of an 2d array texture");
+            }
+            //glFramebufferTextureMultisampleMultiviewOVR
+            //glFramebufferTextureMultiviewOVR
             GL(glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, colorTexture, 0, imageArrayIndex));
             GL(glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthTexture, 0, imageArrayIndex));
         }
         else {
-            GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, colorTexture, 0));
-            GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depthTexture, 0));
+            if(msaa_enable){
+                glFramebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, colorTexture, 0, 4);
+                glFramebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depthTexture, 0, 4);
+            } else {
+                GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, colorTexture, 0));
+                GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depthTexture, 0));
+            }
         }
 
         GLint x = 0;
@@ -1267,10 +1342,12 @@ namespace Conformance
     }
 
     void OpenGLESGraphicsPlugin::RenderView(const XrCompositionLayerProjectionView& layerView,
-                                            const XrSwapchainImageBaseHeader* colorSwapchainImage, const RenderParams& params)
+                                            const XrSwapchainImageBaseHeader* colorSwapchainImage, const RenderParams& params, bool isMotionVectorPass, const XrCompositionLayerProjectionView* prevLayerView)
+
     {
         OpenGLESSwapchainImageData* swapchainData;
         uint32_t imageIndex;
+        bool msaa_enable = GetGlobalData().IsUsingMSAA();
 
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(colorSwapchainImage);
 
@@ -1298,15 +1375,24 @@ namespace Conformance
         GL(glCullFace(GL_BACK));
 
         if (isArray) {
+            if(msaa_enable){
+                throw std::runtime_error("NOT support msaa when using seprated layer of an 2d array texture");
+            }
             GL(glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, colorTexture, 0, layerView.subImage.imageArrayIndex));
             GL(glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthTexture, 0, layerView.subImage.imageArrayIndex));
         }
         else {
-            GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, colorTexture, 0));
-            GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depthTexture, 0));
+            if(msaa_enable){
+                glFramebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, colorTexture, 0, 4);
+                glFramebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depthTexture, 0, 4);
+            } else {
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, colorTexture, 0);
+                glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depthTexture, 0);
+            }
         }
 
         // Set shaders and uniform variables.
+        if(!isMotionVectorPass){
         GL(glUseProgram(m_program));
 
         const auto& pose = layerView.pose;
@@ -1362,6 +1448,63 @@ namespace Conformance
             m_pbrResources->SetViewProjection(view, proj);
 
             gltf.Render(*m_pbrResources, modelToWorld);
+        }
+        } else {
+
+            GL(glUseProgram(m_motionVectorProgram));
+
+            const auto& pose = layerView.pose;
+            XrMatrix4x4f proj;
+            XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_OPENGL_ES, layerView.fov, 0.05f, 100.0f);
+            XrMatrix4x4f toView = Matrix::FromPose(pose);
+            XrMatrix4x4f view = Matrix::InvertRigidBody(toView);
+            XrMatrix4x4f vp = proj * view;
+
+            const auto& posePrev = prevLayerView->pose;
+            XrMatrix4x4f projPrev;
+            XrMatrix4x4f_CreateProjectionFov(&projPrev, GRAPHICS_OPENGL_ES, prevLayerView->fov, 0.05f, 100.0f);
+            XrMatrix4x4f toViewPrev = Matrix::FromPose(posePrev);
+            XrMatrix4x4f viewPrev = Matrix::InvertRigidBody(toViewPrev);
+            XrMatrix4x4f vpPrev = projPrev * viewPrev;
+
+            MeshHandle lastMeshHandle;
+
+            const auto drawMesh = [this, &vp, &vpPrev, &lastMeshHandle](const MeshDrawable mesh) {
+                OpenGLESMesh& glMesh = m_meshes[mesh.handle];
+                if (mesh.handle != lastMeshHandle) {
+                    // We are now rendering a new mesh
+                    GL(glBindVertexArray(glMesh.m_vao));
+                    glBindBuffer(GL_ARRAY_BUFFER, glMesh.m_vertexBuffer);
+                    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, glMesh.m_indexBuffer);
+
+                    lastMeshHandle = mesh.handle;
+                }
+
+                // Compute the model-view-projection transform and set it..
+                XrMatrix4x4f model =
+                    Matrix::FromTranslationRotationScale(mesh.params.pose.position, mesh.params.pose.orientation, mesh.params.scale);
+                XrMatrix4x4f modelPrev =
+                    Matrix::FromTranslationRotationScale(mesh.params.posePrev.position, mesh.params.posePrev.orientation, mesh.params.scalePrev);
+
+                GL(glUniformMatrix4fv(m_mvViewProjectionUniformLocation, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&vp)));
+                GL(glUniformMatrix4fv(m_mvPreViewProjectionUniformLocation, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&vpPrev)));
+                GL(glUniformMatrix4fv(m_mvModelUniformLocation, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&model)));
+                GL(glUniformMatrix4fv(m_mvPrevModelUniformLocation, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&modelPrev)));
+
+                // Draw the mesh.
+                GL(glDrawElements(GL_TRIANGLES, glMesh.m_numIndices, GL_UNSIGNED_SHORT, nullptr));
+            };
+
+            // Render each cube
+            for (const Cube& cube : params.cubes) {
+                drawMesh(MeshDrawable{m_cubeMesh, cube.params.pose, cube.params.scale, cube.tintColor, cube.alpha});
+            }
+
+            // Render each mesh
+            for (const auto& mesh : params.meshes) {
+                drawMesh(mesh);
+            }
+
         }
 
         GL(glBindVertexArray(0));

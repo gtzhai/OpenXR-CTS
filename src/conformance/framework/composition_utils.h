@@ -237,6 +237,8 @@ namespace Conformance
         std::pair<XrSwapchain, XrSwapchain> CreateSwapchainWithDepth(const XrSwapchainCreateInfo& createInfo,
                                                                      const XrSwapchainCreateInfo& depthCreateInfo);
 
+        std::pair<XrSwapchain, XrSwapchain> CreateMotionVectorSwapchainWithDepth(XrExtent2Di* widthHeight);
+
         /// Destroy a swapchain image created using @ref CreateSwapchain()
         ///
         /// @param swapchain A swapchain created with @ref CreateSwapchain or a specialization of it.

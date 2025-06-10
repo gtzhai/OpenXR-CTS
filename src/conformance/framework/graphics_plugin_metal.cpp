@@ -253,7 +253,7 @@ namespace Conformance
         ISwapchainImageData* AllocateSwapchainImageDataWithDepthSwapchain(size_t size,
                                                                           const XrSwapchainCreateInfo& colorSwapchainCreateInfo,
                                                                           XrSwapchain depthSwapchain,
-                                                                          const XrSwapchainCreateInfo& depthSwapchainCreateInfo) override;
+                                                                          const XrSwapchainCreateInfo& depthSwapchainCreateInfo, bool isMotionVector = false) override;
 
         void ClearImageSlice(const XrSwapchainImageBaseHeader* colorSwapchainImage, uint32_t imageArrayIndex, XrColor4f color) override;
 
@@ -265,7 +265,7 @@ namespace Conformance
         Pbr::ModelInstance& GetModelInstance(GLTFModelInstanceHandle handle) override;
 
         void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* colorSwapchainImage,
-                        const RenderParams& params) override;
+                        const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr) override;
 
         void RenderClearImageSliceCompute(const XrCompositionLayerProjectionView& layerView,
                                           const XrSwapchainImageBaseHeader* colorSwapchainImage, XrColor4f color) override;
@@ -706,7 +706,7 @@ namespace Conformance
 
     ISwapchainImageData* MetalGraphicsPlugin::AllocateSwapchainImageDataWithDepthSwapchain(
         size_t size, const XrSwapchainCreateInfo& colorSwapchainCreateInfo, XrSwapchain depthSwapchain,
-        const XrSwapchainCreateInfo& depthSwapchainCreateInfo)
+        const XrSwapchainCreateInfo& depthSwapchainCreateInfo, bool isMotionVector)
     {
 
         auto typedResult = std::make_unique<MetalSwapchainImageData>(m_device, uint32_t(size), colorSwapchainCreateInfo, depthSwapchain,
@@ -812,7 +812,8 @@ namespace Conformance
     }
 
     void MetalGraphicsPlugin::RenderView(const XrCompositionLayerProjectionView& layerView,
-                                         const XrSwapchainImageBaseHeader* colorSwapchainImage, const RenderParams& params)
+                                         const XrSwapchainImageBaseHeader* colorSwapchainImage, const RenderParams& params, bool isMotionVectorPass, const XrCompositionLayerProjectionView* prevLayerView)
+
     {
         auto pAutoReleasePool = NS::TransferPtr(NS::AutoreleasePool::alloc()->init());
 

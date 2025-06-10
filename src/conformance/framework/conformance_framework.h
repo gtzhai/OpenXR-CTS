@@ -321,6 +321,7 @@ namespace Conformance
         /// Populate a FeatureSet with the configured min core version and (default or manually) enabled extensions.
         void PopulateMinVersionAndEnabledExtensions(FeatureSet& out) const;
 
+        bool IsUsingMSAA() const;
     public:
         /// Guards all member data.
         mutable std::recursive_mutex dataMutex;
@@ -389,6 +390,8 @@ namespace Conformance
         /// Required instance creation extension struct, or nullptr.
         /// This is a pointer into IPlatformPlugin-provided memory.
         XrBaseInStructure* requiredPlatformInstanceCreateStruct{};
+
+        bool isUsingMSAA{false};
 
     private:
         VersionDependentDataArray versionDependentData;

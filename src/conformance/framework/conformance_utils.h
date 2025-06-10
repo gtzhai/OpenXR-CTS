@@ -178,11 +178,11 @@ namespace Conformance
 
     /// Creates a depth swapchain for the given session and graphics plugin.
     XrResult CreateDepthSwapchain(XrSession session, IGraphicsPlugin* graphicsPlugin, XrSwapchain* swapchain, XrExtent2Di* widthHeight,
-                                  uint32_t arraySize = 1);
+                                  uint32_t arraySize = 1, XrSwapchainCreateInfo* createInfoReturn = nullptr);
 
     /// Creates a motion vector swapchain for the given session and graphics plugin.
     XrResult CreateMotionVectorSwapchain(XrSession session, IGraphicsPlugin* graphicsPlugin, XrSwapchain* swapchain,
-                                         XrExtent2Di* widthHeight, uint32_t arraySize = 1);
+                                         XrExtent2Di* widthHeight, uint32_t arraySize = 1, XrSwapchainCreateInfo* createInfoReturn = nullptr);
 
     /// Executes xrAcquireSwapchainImage, xrWaitSwapchainImage, xrReleaseSwapchainImage, with no drawing.
     ///

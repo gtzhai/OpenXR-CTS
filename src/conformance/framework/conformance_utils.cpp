@@ -1248,7 +1248,8 @@ namespace Conformance
 
     // Encapsulates xrEnumerateSwapchainFormats/xrCreateSwapchain
     XrResult CreateDepthSwapchain(XrSession session, IGraphicsPlugin* graphicsPlugin, XrSwapchain* swapchain, XrExtent2Di* widthHeight,
-                                  uint32_t arraySize)
+                                  uint32_t arraySize, XrSwapchainCreateInfo* createInfoReturn)
+
     {
         std::vector<int64_t> formatArray;
         uint32_t countOutput;
@@ -1282,6 +1283,10 @@ namespace Conformance
                 createInfo.arraySize = arraySize;
                 createInfo.mipCount = 1;
 
+                if (createInfoReturn) {
+                    *createInfoReturn = createInfo;
+                }
+
                 result = xrCreateSwapchain(session, &createInfo, swapchain);
             }
         }
@@ -1291,7 +1296,7 @@ namespace Conformance
 
     // Encapsulates xrEnumerateSwapchainFormats/xrCreateSwapchain
     XrResult CreateMotionVectorSwapchain(XrSession session, IGraphicsPlugin* graphicsPlugin, XrSwapchain* swapchain,
-                                         XrExtent2Di* widthHeight, uint32_t arraySize)
+                                         XrExtent2Di* widthHeight, uint32_t arraySize, XrSwapchainCreateInfo* createInfoReturn)
     {
         std::vector<int64_t> formatArray;
         uint32_t countOutput;
@@ -1324,6 +1329,10 @@ namespace Conformance
                 createInfo.height = (uint32_t)widthHeight->height;
                 createInfo.arraySize = arraySize;
                 createInfo.mipCount = 1;
+
+                if (createInfoReturn) {
+                    *createInfoReturn = createInfo;
+                }
 
                 result = xrCreateSwapchain(session, &createInfo, swapchain);
             }

@@ -22,7 +22,9 @@ layout (std140, push_constant) uniform buf
 layout (location = 0) in vec3 Position;
 layout (location = 1) in vec3 Color;
 
-layout (location = 0) out vec4 oColor;
+layout (location = 0) out vec4 clipPos;
+layout (location = 1) out vec4 prevClipPos;
+
 out gl_PerVertex
 {
     vec4 gl_Position;
@@ -30,7 +32,7 @@ out gl_PerVertex
 
 void main()
 {
-    oColor.rgb = mix(Color.rgb, ubuf.tintColor.rgb, ubuf.tintColor.a);
-    oColor.a  = ubuf.alpha;
-    gl_Position = ubuf.mvp * vec4(Position, 1);
+    clipPos = ubuf.vp * ( ubuf.model * vec4( Position, 1.0 ) );
+    prevClipPos = ubuf.prevVp * ( ubuf.prevModel* vec4( Position, 1.0 ) );
+    gl_Position = clipPos;
 }

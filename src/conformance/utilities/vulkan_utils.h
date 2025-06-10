@@ -44,6 +44,7 @@
 namespace Conformance
 {
     using nonstd::span;
+    extern PFN_vkCreateRenderPass2KHR vkCreateRenderPass2KHR;
 
     inline std::string vkResultString(VkResult res)
     {
@@ -820,8 +821,10 @@ namespace Conformance
         RenderPass() = default;
 
         bool Create(const VulkanDebugObjectNamer& namer, VkDevice device, VkFormat aColorFmt, VkFormat aDepthFmt,
-                    VkSampleCountFlagBits aSampleCount)
+                    VkSampleCountFlagBits aSampleCount, bool msaa_enable)
         {
+            bool usingRP2 = false;
+
             m_vkDevice = device;
             colorFmt = aColorFmt;
             depthFmt = aDepthFmt;
@@ -832,8 +835,28 @@ namespace Conformance
 
             VkAttachmentReference colorRef = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
             VkAttachmentReference depthRef = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+            VkAttachmentReference colorResolveRef = {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
+            VkAttachmentReference depthResolveRef = {3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
 
-            std::array<VkAttachmentDescription, 2> at = {};
+            VkAttachmentReference2 colorRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT};
+            VkAttachmentReference2 depthRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT};
+            VkAttachmentReference2 colorResolveRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT};
+            VkAttachmentReference2 depthResolveRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT};
+
+            std::array<VkAttachmentDescription, 4> at = {};
+            std::array<VkAttachmentDescription2KHR, 4> at2 = {};
+
+            VkSubpassDescriptionDepthStencilResolveKHR vkSubpassDescriptionDepthStencilResolve;
+            vkSubpassDescriptionDepthStencilResolve.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE_KHR;
+            vkSubpassDescriptionDepthStencilResolve.pNext = NULL;
+            vkSubpassDescriptionDepthStencilResolve.depthResolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT_KHR;
+            vkSubpassDescriptionDepthStencilResolve.stencilResolveMode = VK_RESOLVE_MODE_SAMPLE_ZERO_BIT_KHR;
+
+            VkSubpassDescription2KHR subpass2 = {};
+            subpass2.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_2_KHR;
+            subpass2.pNext = &vkSubpassDescriptionDepthStencilResolve;
+            subpass2.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+            subpass2.colorAttachmentCount = 1;
 
             VkRenderPassCreateInfo rpInfo{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
             rpInfo.attachmentCount = 0;
@@ -845,34 +868,142 @@ namespace Conformance
                 colorRef.attachment = rpInfo.attachmentCount++;
 
                 at[colorRef.attachment].format = colorFmt;
-                at[colorRef.attachment].samples = sampleCount;
+                at[colorRef.attachment].samples = msaa_enable?VK_SAMPLE_COUNT_4_BIT:sampleCount;
                 at[colorRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                at[colorRef.attachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                at[colorRef.attachment].storeOp = msaa_enable?VK_ATTACHMENT_STORE_OP_DONT_CARE:VK_ATTACHMENT_STORE_OP_STORE;
                 at[colorRef.attachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
                 at[colorRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
                 at[colorRef.attachment].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
                 at[colorRef.attachment].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+                at2[colorRef2.attachment] = {
+                    VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR,
+                    nullptr,
+                    0,
+                    colorFmt,
+                    msaa_enable?VK_SAMPLE_COUNT_4_BIT:sampleCount,
+                    VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    VK_ATTACHMENT_STORE_OP_STORE,
+                    VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                    VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                };
+
                 subpass.colorAttachmentCount = 1;
                 subpass.pColorAttachments = &colorRef;
+
+                subpass2.colorAttachmentCount = 1;
+                subpass2.pColorAttachments = &colorRef2;
             }
 
             if (depthFmt != VK_FORMAT_UNDEFINED) {
                 depthRef.attachment = rpInfo.attachmentCount++;
 
                 at[depthRef.attachment].format = depthFmt;
-                at[depthRef.attachment].samples = sampleCount;
+                at[depthRef.attachment].samples = msaa_enable?VK_SAMPLE_COUNT_4_BIT:sampleCount;
                 at[depthRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                at[depthRef.attachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                at[depthRef.attachment].storeOp = msaa_enable?VK_ATTACHMENT_STORE_OP_DONT_CARE:VK_ATTACHMENT_STORE_OP_STORE;
                 at[depthRef.attachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
                 at[depthRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
                 at[depthRef.attachment].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
                 at[depthRef.attachment].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+                at2[depthRef2.attachment] = {
+                    VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR,
+                    nullptr,
+                    0,
+                    depthFmt,
+                    msaa_enable?VK_SAMPLE_COUNT_4_BIT:sampleCount,
+                    VK_ATTACHMENT_LOAD_OP_CLEAR,
+                    VK_ATTACHMENT_STORE_OP_STORE,
+                    VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                    VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                    VK_IMAGE_LAYOUT_UNDEFINED,
+                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                };
+
                 subpass.pDepthStencilAttachment = &depthRef;
+                subpass2.pDepthStencilAttachment = &depthRef2;
             }
 
-            XRC_CHECK_THROW_VKCMD(vkCreateRenderPass(m_vkDevice, &rpInfo, nullptr, &pass));
+            if(msaa_enable){
+                usingRP2 = true;
+
+                if (colorFmt != VK_FORMAT_UNDEFINED) {
+                    colorResolveRef.attachment = rpInfo.attachmentCount++;
+
+                    at[colorResolveRef.attachment].format = colorFmt;
+                    at[colorResolveRef.attachment].samples = sampleCount;
+                    at[colorResolveRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                    at[colorResolveRef.attachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                    at[colorResolveRef.attachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                    at[colorResolveRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                    at[colorResolveRef.attachment].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                    at[colorResolveRef.attachment].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+                    at2[colorResolveRef2.attachment] = {
+                        VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR,
+                        nullptr,
+                        0,
+                        colorFmt,
+                        sampleCount,
+                        VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        VK_ATTACHMENT_STORE_OP_STORE,
+                        VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                        VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    };
+
+                    subpass2.pResolveAttachments = &colorResolveRef2;
+                }
+
+                if (depthFmt != VK_FORMAT_UNDEFINED) {
+                    depthResolveRef.attachment = rpInfo.attachmentCount++;
+
+                    at[depthResolveRef.attachment].format = depthFmt;
+                    at[depthResolveRef.attachment].samples = sampleCount;
+                    at[depthResolveRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+                    at[depthResolveRef.attachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                    at[depthResolveRef.attachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                    at[depthResolveRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                    at[depthResolveRef.attachment].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                    at[depthResolveRef.attachment].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+                    at2[depthResolveRef2.attachment] = {
+                        VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR,
+                        nullptr,
+                        0,
+                        depthFmt,
+                        sampleCount,
+                        VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        VK_ATTACHMENT_STORE_OP_STORE,
+                        VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                        VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    };
+
+                    vkSubpassDescriptionDepthStencilResolve.pDepthStencilResolveAttachment = &depthResolveRef2;
+                }
+            }
+
+            if(usingRP2){
+                VkRenderPassCreateInfo2KHR rpInfo2{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2_KHR};
+                rpInfo2.attachmentCount = 4;
+                rpInfo2.pAttachments = at2.data();
+                rpInfo2.subpassCount = 1;
+                rpInfo2.pSubpasses = &subpass2;
+                rpInfo2.pNext = nullptr;
+                rpInfo2.pDependencies = nullptr;
+                rpInfo2.dependencyCount = 0;
+
+                XRC_CHECK_THROW_VKCMD(vkCreateRenderPass2KHR(m_vkDevice, &rpInfo2, nullptr, &pass));
+            }
+            else{
+                XRC_CHECK_THROW_VKCMD(vkCreateRenderPass(m_vkDevice, &rpInfo, nullptr, &pass));
+            }
             XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_RENDER_PASS, (uint64_t)pass, "CTS render pass"));
 
             return true;
@@ -912,6 +1043,11 @@ namespace Conformance
         VkImageView depthView{VK_NULL_HANDLE};
         VkFramebuffer fb{VK_NULL_HANDLE};
 
+        VkImage colorImageResolve{VK_NULL_HANDLE};
+        VkImage depthImageResolve{VK_NULL_HANDLE};
+        VkImageView colorViewResolve{VK_NULL_HANDLE};
+        VkImageView depthViewResolve{VK_NULL_HANDLE};
+
         RenderTarget() = default;
 
         ~RenderTarget()
@@ -926,6 +1062,12 @@ namespace Conformance
                 if (depthView != VK_NULL_HANDLE) {
                     vkDestroyImageView(m_vkDevice, depthView, nullptr);
                 }
+                if (colorViewResolve != VK_NULL_HANDLE) {
+                    vkDestroyImageView(m_vkDevice, colorViewResolve, nullptr);
+                }
+                if (depthViewResolve != VK_NULL_HANDLE) {
+                    vkDestroyImageView(m_vkDevice, depthViewResolve, nullptr);
+                }
             }
 
             // Note we don't own color/depthImage, it will get destroyed when xrDestroySwapchain is called
@@ -933,6 +1075,10 @@ namespace Conformance
             depthImage = VK_NULL_HANDLE;
             colorView = VK_NULL_HANDLE;
             depthView = VK_NULL_HANDLE;
+            colorImageResolve = VK_NULL_HANDLE;
+            depthImageResolve = VK_NULL_HANDLE;
+            colorViewResolve = VK_NULL_HANDLE;
+            depthViewResolve = VK_NULL_HANDLE;
             fb = VK_NULL_HANDLE;
             m_vkDevice = VK_NULL_HANDLE;
         }
@@ -944,6 +1090,10 @@ namespace Conformance
             swap(depthImage, other.depthImage);
             swap(colorView, other.colorView);
             swap(depthView, other.depthView);
+            swap(colorImageResolve, other.colorImageResolve);
+            swap(depthImageResolve, other.depthImageResolve);
+            swap(colorViewResolve, other.colorViewResolve);
+            swap(depthViewResolve, other.depthViewResolve);
             swap(fb, other.fb);
             swap(m_vkDevice, other.m_vkDevice);
         }
@@ -959,19 +1109,31 @@ namespace Conformance
             swap(depthImage, other.depthImage);
             swap(colorView, other.colorView);
             swap(depthView, other.depthView);
+            swap(colorImageResolve, other.colorImageResolve);
+            swap(depthImageResolve, other.depthImageResolve);
+            swap(colorViewResolve, other.colorViewResolve);
+            swap(depthViewResolve, other.depthViewResolve);
+
             swap(fb, other.fb);
             swap(m_vkDevice, other.m_vkDevice);
             return *this;
         }
         void Create(const VulkanDebugObjectNamer& namer, VkDevice device, VkImage aColorImage, VkImage aDepthOrStencilImage,
-                    VkImageAspectFlags depthOrStencilImageAspect, uint32_t baseArrayLayer, VkExtent2D size, RenderPass& renderPass)
+                    VkImageAspectFlags depthOrStencilImageAspect, uint32_t baseArrayLayer, VkExtent2D size, RenderPass& renderPass, VkImage aColorImageMSAA, VkImage aDepthOrStencilImageMSAA, bool msaa_enable)
         {
             m_vkDevice = device;
 
-            colorImage = aColorImage;
-            depthImage = aDepthOrStencilImage;
+            if(msaa_enable){
+                colorImage = aColorImageMSAA;
+                depthImage = aDepthOrStencilImageMSAA;
+                colorImageResolve = aColorImage;
+                depthImageResolve = aDepthOrStencilImage;
+            } else {
+                colorImage = aColorImage;
+                depthImage = aDepthOrStencilImage;
+            }
 
-            std::array<VkImageView, 2> attachments{};
+            std::array<VkImageView, 4> attachments{};
             uint32_t attachmentCount = 0;
 
             // Create color image view
@@ -1026,6 +1188,60 @@ namespace Conformance
                 attachments[attachmentCount++] = depthView;
             }
 
+            if(msaa_enable){
+                // Create color resolve image view
+                if (colorImageResolve != VK_NULL_HANDLE) {
+                    VkImageViewCreateInfo colorViewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+                    colorViewInfo.image = colorImageResolve;
+                    colorViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                    colorViewInfo.format = renderPass.colorFmt;
+                    colorViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
+                    colorViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
+                    colorViewInfo.components.b = VK_COMPONENT_SWIZZLE_B;
+                    colorViewInfo.components.a = VK_COMPONENT_SWIZZLE_A;
+                    colorViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                    colorViewInfo.subresourceRange.baseMipLevel = 0;
+                    colorViewInfo.subresourceRange.levelCount = 1;
+                    colorViewInfo.subresourceRange.baseArrayLayer = baseArrayLayer;
+                    colorViewInfo.subresourceRange.layerCount = 1;
+                    XRC_CHECK_THROW_VKCMD(vkCreateImageView(m_vkDevice, &colorViewInfo, nullptr, &colorViewResolve));
+                    XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)colorViewResolve, "CTS color image resolve view"));
+                    attachments[attachmentCount++] = colorViewResolve;
+                }
+
+                // Create depth resolve image view
+                if (depthImageResolve != VK_NULL_HANDLE) {
+                    VkImageViewCreateInfo depthViewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+                    depthViewInfo.image = depthImageResolve;
+                    depthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                    depthViewInfo.format = renderPass.depthFmt;
+                    depthViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
+                    depthViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
+                    depthViewInfo.components.b = VK_COMPONENT_SWIZZLE_B;
+                    depthViewInfo.components.a = VK_COMPONENT_SWIZZLE_A;
+                    depthViewInfo.subresourceRange.aspectMask = depthOrStencilImageAspect;
+                    depthViewInfo.subresourceRange.baseMipLevel = 0;
+                    depthViewInfo.subresourceRange.levelCount = 1;
+                    depthViewInfo.subresourceRange.baseArrayLayer = baseArrayLayer;
+                    depthViewInfo.subresourceRange.layerCount = 1;
+                    XRC_CHECK_THROW_VKCMD(vkCreateImageView(m_vkDevice, &depthViewInfo, nullptr, &depthViewResolve));
+
+                    const bool isDepth = depthOrStencilImageAspect & VK_IMAGE_ASPECT_DEPTH_BIT;
+                    const bool isStencil = depthOrStencilImageAspect & VK_IMAGE_ASPECT_STENCIL_BIT;
+                    if (isDepth && isStencil) {
+                        XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)depthViewResolve, "CTS depth/stencil resolve image view"));
+                    }
+                    else if (isDepth) {
+                        XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)depthViewResolve, "CTS depth resolve image view"));
+                    }
+                    else if (isStencil) {
+                        XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)depthViewResolve, "CTS stencil resolve image view"));
+                    }
+
+                    attachments[attachmentCount++] = depthViewResolve;
+                }
+            }
+
             VkFramebufferCreateInfo fbInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
             fbInfo.renderPass = renderPass.pass;
             fbInfo.attachmentCount = attachmentCount;
@@ -1047,6 +1263,12 @@ namespace Conformance
     struct VulkanUniformBuffer
     {
         XrMatrix4x4f mvp;
+
+        XrMatrix4x4f vp;
+        XrMatrix4x4f prevVp;
+        XrMatrix4x4f model;
+        XrMatrix4x4f prevModel;
+
         XrColor4f tintColor;
         float alpha;
     };
@@ -1414,6 +1636,130 @@ namespace Conformance
 
         DepthBuffer(const DepthBuffer&) = delete;
         DepthBuffer& operator=(const DepthBuffer&) = delete;
+
+    private:
+        bool m_initialized{false};
+        VkDevice m_vkDevice{VK_NULL_HANDLE};
+        VkImageLayout m_vkLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        XrSwapchainImageVulkanKHR m_xrImage{XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR, nullptr, VK_NULL_HANDLE};
+    };
+    struct ColorBuffer
+    {
+        VkDeviceMemory colorMemory{VK_NULL_HANDLE};
+        VkImage colorImage{VK_NULL_HANDLE};
+
+        ColorBuffer() = default;
+        ~ColorBuffer()
+        {
+            Reset();
+        }
+
+        void Reset()
+        {
+            if (m_vkDevice != nullptr) {
+                if (colorImage != VK_NULL_HANDLE) {
+                    vkDestroyImage(m_vkDevice, colorImage, nullptr);
+                }
+                if (colorMemory != VK_NULL_HANDLE) {
+                    vkFreeMemory(m_vkDevice, colorMemory, nullptr);
+                }
+            }
+            colorImage = VK_NULL_HANDLE;
+            colorMemory = VK_NULL_HANDLE;
+            m_vkDevice = nullptr;
+            m_initialized = false;
+        }
+        void swap(ColorBuffer& other) noexcept
+        {
+            using std::swap;
+
+            swap(colorImage, other.colorImage);
+            swap(colorMemory, other.colorMemory);
+            swap(m_vkDevice, other.m_vkDevice);
+            swap(m_initialized, other.m_initialized);
+            swap(m_xrImage, other.m_xrImage);
+        }
+
+        ColorBuffer(ColorBuffer&& other) noexcept : ColorBuffer()
+        {
+            swap(other);
+        }
+        ColorBuffer& operator=(ColorBuffer&& other) noexcept
+        {
+            if (&other == this) {
+                return *this;
+            }
+            // clean up self
+            this->~ColorBuffer();
+            swap(other);
+
+            return *this;
+        }
+
+        bool Allocated()
+        {
+            return m_initialized;
+        }
+
+        void Allocate(const VulkanDebugObjectNamer& namer, VkDevice device, MemoryAllocator* memAllocator, VkFormat colorFormat,
+                      uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount)
+        {
+            Reset();
+
+            m_vkDevice = device;
+
+            // Create a D32 colorbuffer
+            VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+            imageInfo.imageType = VK_IMAGE_TYPE_2D;
+            imageInfo.extent.width = width;
+            imageInfo.extent.height = height;
+            imageInfo.extent.depth = 1;
+            imageInfo.mipLevels = 1;
+            imageInfo.arrayLayers = arraySize;
+            imageInfo.format = colorFormat;
+            imageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+            imageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+            imageInfo.usage = VK_IMAGE_USAGE_TRANSIENT_ATTACHMENT_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+            imageInfo.samples = (VkSampleCountFlagBits)sampleCount;
+            imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            XRC_CHECK_THROW_VKCMD(vkCreateImage(device, &imageInfo, nullptr, &colorImage));
+            XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE, (uint64_t)colorImage, "CTS fallback color image"));
+            m_xrImage.image = colorImage;
+
+            VkMemoryRequirements memRequirements{};
+            vkGetImageMemoryRequirements(device, colorImage, &memRequirements);
+            memAllocator->Allocate(memRequirements, &colorMemory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)colorMemory, "CTS fallback color image memory"));
+            XRC_CHECK_THROW_VKCMD(vkBindImageMemory(device, colorImage, colorMemory, 0));
+
+            m_initialized = true;
+        }
+
+        void TransitionLayout(CmdBuffer* cmdBuffer, VkImageLayout newLayout)
+        {
+            if (!m_initialized || (newLayout == m_vkLayout)) {
+                return;
+            }
+
+            VkImageMemoryBarrier colorBarrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+            colorBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+            colorBarrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT;
+            colorBarrier.oldLayout = m_vkLayout;
+            colorBarrier.newLayout = newLayout;
+            colorBarrier.image = colorImage;
+            colorBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+            vkCmdPipelineBarrier(cmdBuffer->buf, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, 0, 0, nullptr, 0,
+                                 nullptr, 1, &colorBarrier);
+
+            m_vkLayout = newLayout;
+        }
+        const XrSwapchainImageVulkanKHR& GetTexture() const
+        {
+            return m_xrImage;
+        }
+
+        ColorBuffer(const ColorBuffer&) = delete;
+        ColorBuffer& operator=(const ColorBuffer&) = delete;
 
     private:
         bool m_initialized{false};
