@@ -78,6 +78,7 @@ android {
         main {
             manifest.srcFile 'platform_specific/AndroidManifest.xml'
             res.srcDirs 'platform_specific/android_resources'
+            jniLibs.srcDirs  'libs'
             assets.srcDirs assetDest
         }
     }

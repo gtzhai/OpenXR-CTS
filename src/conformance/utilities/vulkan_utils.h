@@ -41,6 +41,9 @@
 #define SPV_SUFFIX
 #endif
 
+#define FEATURE_ADD_MSAA 1
+#define FEATURE_ADD_MOTION_VECTOR 1
+
 namespace Conformance
 {
     using nonstd::span;
@@ -825,6 +828,7 @@ namespace Conformance
         {
             bool usingRP2 = false;
 
+            (msaa_enable);
             m_vkDevice = device;
             colorFmt = aColorFmt;
             depthFmt = aDepthFmt;
@@ -835,15 +839,51 @@ namespace Conformance
 
             VkAttachmentReference colorRef = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
             VkAttachmentReference depthRef = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-            VkAttachmentReference colorResolveRef = {2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
-            VkAttachmentReference depthResolveRef = {3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
+            std::array<VkAttachmentDescription, 2> at = {};
 
+            VkRenderPassCreateInfo rpInfo{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
+            rpInfo.attachmentCount = 0;
+            rpInfo.pAttachments = at.data();
+            rpInfo.subpassCount = 1;
+            rpInfo.pSubpasses = &subpass;
+
+            if (colorFmt != VK_FORMAT_UNDEFINED) {
+                colorRef.attachment = rpInfo.attachmentCount++;
+
+                at[colorRef.attachment].format = colorFmt;
+                at[colorRef.attachment].samples = sampleCount;
+                at[colorRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                at[colorRef.attachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                at[colorRef.attachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                at[colorRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                at[colorRef.attachment].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+                at[colorRef.attachment].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+                subpass.colorAttachmentCount = 1;
+                subpass.pColorAttachments = &colorRef;
+            }
+
+            if (depthFmt != VK_FORMAT_UNDEFINED) {
+                depthRef.attachment = rpInfo.attachmentCount++;
+
+                at[depthRef.attachment].format = depthFmt;
+                at[depthRef.attachment].samples = sampleCount;
+                at[depthRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                at[depthRef.attachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+                at[depthRef.attachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+                at[depthRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                at[depthRef.attachment].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+                at[depthRef.attachment].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+                subpass.pDepthStencilAttachment = &depthRef;
+            }
+
+            #ifdef FEATURE_ADD_MSAA
             VkAttachmentReference2 colorRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT};
             VkAttachmentReference2 depthRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT};
             VkAttachmentReference2 colorResolveRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT};
             VkAttachmentReference2 depthResolveRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT};
 
-            std::array<VkAttachmentDescription, 4> at = {};
             std::array<VkAttachmentDescription2KHR, 4> at2 = {};
 
             VkSubpassDescriptionDepthStencilResolveKHR vkSubpassDescriptionDepthStencilResolve;
@@ -858,90 +898,10 @@ namespace Conformance
             subpass2.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
             subpass2.colorAttachmentCount = 1;
 
-            VkRenderPassCreateInfo rpInfo{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-            rpInfo.attachmentCount = 0;
-            rpInfo.pAttachments = at.data();
-            rpInfo.subpassCount = 1;
-            rpInfo.pSubpasses = &subpass;
-
-            if (colorFmt != VK_FORMAT_UNDEFINED) {
-                colorRef.attachment = rpInfo.attachmentCount++;
-
-                at[colorRef.attachment].format = colorFmt;
-                at[colorRef.attachment].samples = msaa_enable?VK_SAMPLE_COUNT_4_BIT:sampleCount;
-                at[colorRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                at[colorRef.attachment].storeOp = msaa_enable?VK_ATTACHMENT_STORE_OP_DONT_CARE:VK_ATTACHMENT_STORE_OP_STORE;
-                at[colorRef.attachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                at[colorRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                at[colorRef.attachment].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-                at[colorRef.attachment].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-                at2[colorRef2.attachment] = {
-                    VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR,
-                    nullptr,
-                    0,
-                    colorFmt,
-                    msaa_enable?VK_SAMPLE_COUNT_4_BIT:sampleCount,
-                    VK_ATTACHMENT_LOAD_OP_CLEAR,
-                    VK_ATTACHMENT_STORE_OP_STORE,
-                    VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-                    VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                    VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                };
-
-                subpass.colorAttachmentCount = 1;
-                subpass.pColorAttachments = &colorRef;
-
-                subpass2.colorAttachmentCount = 1;
-                subpass2.pColorAttachments = &colorRef2;
-            }
-
-            if (depthFmt != VK_FORMAT_UNDEFINED) {
-                depthRef.attachment = rpInfo.attachmentCount++;
-
-                at[depthRef.attachment].format = depthFmt;
-                at[depthRef.attachment].samples = msaa_enable?VK_SAMPLE_COUNT_4_BIT:sampleCount;
-                at[depthRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-                at[depthRef.attachment].storeOp = msaa_enable?VK_ATTACHMENT_STORE_OP_DONT_CARE:VK_ATTACHMENT_STORE_OP_STORE;
-                at[depthRef.attachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                at[depthRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                at[depthRef.attachment].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-                at[depthRef.attachment].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-                at2[depthRef2.attachment] = {
-                    VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR,
-                    nullptr,
-                    0,
-                    depthFmt,
-                    msaa_enable?VK_SAMPLE_COUNT_4_BIT:sampleCount,
-                    VK_ATTACHMENT_LOAD_OP_CLEAR,
-                    VK_ATTACHMENT_STORE_OP_STORE,
-                    VK_ATTACHMENT_LOAD_OP_DONT_CARE,
-                    VK_ATTACHMENT_STORE_OP_DONT_CARE,
-                    VK_IMAGE_LAYOUT_UNDEFINED,
-                    VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                };
-
-                subpass.pDepthStencilAttachment = &depthRef;
-                subpass2.pDepthStencilAttachment = &depthRef2;
-            }
-
             if(msaa_enable){
                 usingRP2 = true;
 
                 if (colorFmt != VK_FORMAT_UNDEFINED) {
-                    colorResolveRef.attachment = rpInfo.attachmentCount++;
-
-                    at[colorResolveRef.attachment].format = colorFmt;
-                    at[colorResolveRef.attachment].samples = sampleCount;
-                    at[colorResolveRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                    at[colorResolveRef.attachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-                    at[colorResolveRef.attachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                    at[colorResolveRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                    at[colorResolveRef.attachment].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-                    at[colorResolveRef.attachment].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
                     at2[colorResolveRef2.attachment] = {
                         VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR,
                         nullptr,
@@ -960,17 +920,6 @@ namespace Conformance
                 }
 
                 if (depthFmt != VK_FORMAT_UNDEFINED) {
-                    depthResolveRef.attachment = rpInfo.attachmentCount++;
-
-                    at[depthResolveRef.attachment].format = depthFmt;
-                    at[depthResolveRef.attachment].samples = sampleCount;
-                    at[depthResolveRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-                    at[depthResolveRef.attachment].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-                    at[depthResolveRef.attachment].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-                    at[depthResolveRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-                    at[depthResolveRef.attachment].initialLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-                    at[depthResolveRef.attachment].finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
                     at2[depthResolveRef2.attachment] = {
                         VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR,
                         nullptr,
@@ -987,9 +936,44 @@ namespace Conformance
 
                     vkSubpassDescriptionDepthStencilResolve.pDepthStencilResolveAttachment = &depthResolveRef2;
                 }
-            }
 
-            if(usingRP2){
+                sampleCount = VK_SAMPLE_COUNT_4_BIT;
+                if (colorFmt != VK_FORMAT_UNDEFINED) {
+                    at2[colorRef2.attachment] = {
+                        VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR,
+                        nullptr,
+                        0,
+                        colorFmt,
+                        sampleCount,
+                        VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        VK_ATTACHMENT_STORE_OP_STORE,
+                        VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                        VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                    };
+
+                    subpass2.colorAttachmentCount = 1;
+                    subpass2.pColorAttachments = &colorRef2;
+                }
+
+                if (depthFmt != VK_FORMAT_UNDEFINED) {
+                    at2[depthRef2.attachment] = {
+                        VK_STRUCTURE_TYPE_ATTACHMENT_DESCRIPTION_2_KHR,
+                        nullptr,
+                        0,
+                        depthFmt,
+                        sampleCount,
+                        VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        VK_ATTACHMENT_STORE_OP_STORE,
+                        VK_ATTACHMENT_LOAD_OP_DONT_CARE,
+                        VK_ATTACHMENT_STORE_OP_DONT_CARE,
+                        VK_IMAGE_LAYOUT_UNDEFINED,
+                        VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+                    };
+                    subpass2.pDepthStencilAttachment = &depthRef2;
+                }
+
                 VkRenderPassCreateInfo2KHR rpInfo2{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO_2_KHR};
                 rpInfo2.attachmentCount = 4;
                 rpInfo2.pAttachments = at2.data();
@@ -999,11 +983,16 @@ namespace Conformance
                 rpInfo2.pDependencies = nullptr;
                 rpInfo2.dependencyCount = 0;
 
+                ALOGE("%s:msaa create render pass", __func__);
+
                 XRC_CHECK_THROW_VKCMD(vkCreateRenderPass2KHR(m_vkDevice, &rpInfo2, nullptr, &pass));
-            }
-            else{
+            } else {
                 XRC_CHECK_THROW_VKCMD(vkCreateRenderPass(m_vkDevice, &rpInfo, nullptr, &pass));
             }
+            #else
+                XRC_CHECK_THROW_VKCMD(vkCreateRenderPass(m_vkDevice, &rpInfo, nullptr, &pass));
+            #endif
+
             XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_RENDER_PASS, (uint64_t)pass, "CTS render pass"));
 
             return true;
@@ -1043,10 +1032,12 @@ namespace Conformance
         VkImageView depthView{VK_NULL_HANDLE};
         VkFramebuffer fb{VK_NULL_HANDLE};
 
+        #ifdef FEATURE_ADD_MSAA
         VkImage colorImageResolve{VK_NULL_HANDLE};
         VkImage depthImageResolve{VK_NULL_HANDLE};
         VkImageView colorViewResolve{VK_NULL_HANDLE};
         VkImageView depthViewResolve{VK_NULL_HANDLE};
+        #endif
 
         RenderTarget() = default;
 
@@ -1062,12 +1053,14 @@ namespace Conformance
                 if (depthView != VK_NULL_HANDLE) {
                     vkDestroyImageView(m_vkDevice, depthView, nullptr);
                 }
+                #ifdef FEATURE_ADD_MSAA
                 if (colorViewResolve != VK_NULL_HANDLE) {
                     vkDestroyImageView(m_vkDevice, colorViewResolve, nullptr);
                 }
                 if (depthViewResolve != VK_NULL_HANDLE) {
                     vkDestroyImageView(m_vkDevice, depthViewResolve, nullptr);
                 }
+                #endif
             }
 
             // Note we don't own color/depthImage, it will get destroyed when xrDestroySwapchain is called
@@ -1075,10 +1068,12 @@ namespace Conformance
             depthImage = VK_NULL_HANDLE;
             colorView = VK_NULL_HANDLE;
             depthView = VK_NULL_HANDLE;
+        #ifdef FEATURE_ADD_MSAA
             colorImageResolve = VK_NULL_HANDLE;
             depthImageResolve = VK_NULL_HANDLE;
             colorViewResolve = VK_NULL_HANDLE;
             depthViewResolve = VK_NULL_HANDLE;
+        #endif
             fb = VK_NULL_HANDLE;
             m_vkDevice = VK_NULL_HANDLE;
         }
@@ -1090,10 +1085,14 @@ namespace Conformance
             swap(depthImage, other.depthImage);
             swap(colorView, other.colorView);
             swap(depthView, other.depthView);
+
+            #ifdef FEATURE_ADD_MSAA
             swap(colorImageResolve, other.colorImageResolve);
             swap(depthImageResolve, other.depthImageResolve);
             swap(colorViewResolve, other.colorViewResolve);
             swap(depthViewResolve, other.depthViewResolve);
+            #endif
+
             swap(fb, other.fb);
             swap(m_vkDevice, other.m_vkDevice);
         }
@@ -1109,10 +1108,13 @@ namespace Conformance
             swap(depthImage, other.depthImage);
             swap(colorView, other.colorView);
             swap(depthView, other.depthView);
+
+            #ifdef FEATURE_ADD_MSAA
             swap(colorImageResolve, other.colorImageResolve);
             swap(depthImageResolve, other.depthImageResolve);
             swap(colorViewResolve, other.colorViewResolve);
             swap(depthViewResolve, other.depthViewResolve);
+            #endif
 
             swap(fb, other.fb);
             swap(m_vkDevice, other.m_vkDevice);
@@ -1123,6 +1125,7 @@ namespace Conformance
         {
             m_vkDevice = device;
 
+            #ifdef FEATURE_ADD_MSAA
             if(msaa_enable){
                 colorImage = aColorImageMSAA;
                 depthImage = aDepthOrStencilImageMSAA;
@@ -1132,6 +1135,11 @@ namespace Conformance
                 colorImage = aColorImage;
                 depthImage = aDepthOrStencilImage;
             }
+            #else
+            (aColorImageMSAA);(aDepthOrStencilImageMSAA);(msaa_enable);
+                colorImage = aColorImage;
+                depthImage = aDepthOrStencilImage;
+            #endif
 
             std::array<VkImageView, 4> attachments{};
             uint32_t attachmentCount = 0;
@@ -1188,6 +1196,7 @@ namespace Conformance
                 attachments[attachmentCount++] = depthView;
             }
 
+            #ifdef FEATURE_ADD_MSAA
             if(msaa_enable){
                 // Create color resolve image view
                 if (colorImageResolve != VK_NULL_HANDLE) {
@@ -1241,6 +1250,7 @@ namespace Conformance
                     attachments[attachmentCount++] = depthViewResolve;
                 }
             }
+            #endif
 
             VkFramebufferCreateInfo fbInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
             fbInfo.renderPass = renderPass.pass;
@@ -1263,15 +1273,23 @@ namespace Conformance
     struct VulkanUniformBuffer
     {
         XrMatrix4x4f mvp;
+        XrMatrix4x4f p0;
+        XrMatrix4x4f p1;
+        XrColor4f tintColor;
+        XrVector4f alpha;
+        XrVector4f p2;
+        XrVector4f p3;
+    };
 
+    //#ifdef FEATURE_ADD_MOTION_VECTOR
+    struct VulkanUniformBufferMV
+    {
         XrMatrix4x4f vp;
         XrMatrix4x4f prevVp;
         XrMatrix4x4f model;
         XrMatrix4x4f prevModel;
-
-        XrColor4f tintColor;
-        float alpha;
     };
+    //#endif
 
     // Simple vertex MVP xform, tint color & color fragment shader layout
     struct PipelineLayout

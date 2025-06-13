@@ -10,13 +10,10 @@
 
 layout (std140, push_constant) uniform buf
 {
-    mat4 mvp;
     mat4 vp;
     mat4 prevVp;
     mat4 model;
     mat4 prevModel;
-    vec4 tintColor;
-    float alpha;
 } ubuf;
 
 layout (location = 0) in vec3 Position;

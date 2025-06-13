@@ -67,6 +67,7 @@
 #include <tuple>
 #include <utility>
 #include <vector>
+#include "common/android_logging.h"
 
 namespace tinygltf
 {
@@ -96,7 +97,7 @@ namespace Conformance
         mat4 model;
         mat4 prevModel;
         vec4 tintColor;
-        float alpha;
+        vec4 alpha;
     } ubuf;
 
     layout (location = 0) in vec3 Position;
@@ -111,7 +112,7 @@ namespace Conformance
     void main()
     {
         oColor.rgb = mix(Color.rgb, ubuf.tintColor.rgb, ubuf.tintColor.a);
-        oColor.a  = ubuf.alpha;
+        oColor.a  = ubuf.alpha.x;
         gl_Position = ubuf.mvp * vec4(Position, 1);
     }
 )_";
@@ -223,18 +224,22 @@ namespace Conformance
                   span<const VkVertexInputAttributeDescription> attrDesc)
         {
             m_depthBuffer.resize(capacity);
+            #ifdef FEATURE_ADD_MSAA
             m_depthBufferMSAA.resize(capacity);
             m_colorBufferMSAA.resize(capacity);
+            #endif
 
             for (auto& slice : m_slices) {
                 slice.init(m_namer, m_vkDevice, capacity, m_size, colorFormat, m_depthFormat, m_sampleCount, layout, computeLayout, sp,
                            spCompute, bindDesc, attrDesc);
             }
 
+            #ifdef FEATURE_ADD_MSAA
             bool msaa_enable = GetGlobalData().IsUsingMSAA();
             if(msaa_enable){
                 prepareMSAAImages(colorFormat, m_depthFormat);
             }
+            #endif
         }
 
     public:
@@ -284,8 +289,13 @@ namespace Conformance
             RenderTarget& rt = m_slices[arraySlice].m_renderTarget[index];
             RenderPass& rp = m_slices[arraySlice].m_rp;
             if (rt.fb == VK_NULL_HANDLE) {
+            #ifdef FEATURE_ADD_MSAA
                 rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image, secondAttachmentAspect,
-                          arraySlice, m_size, rp, m_depthBufferMSAA[index].GetTexture().image, m_depthBufferMSAA[index].GetTexture().image, msaa_enable);
+                          arraySlice, m_size, rp, m_colorBufferMSAA[index].GetTexture().image, m_depthBufferMSAA[index].GetTexture().image, msaa_enable);
+            #else
+                rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image, secondAttachmentAspect,
+                          arraySlice, m_size, rp, VK_NULL_HANDLE, VK_NULL_HANDLE, false);
+            #endif
 
             }
             renderPassBeginInfo->renderPass = rp.pass;
@@ -310,10 +320,12 @@ namespace Conformance
         void TransitionLayout(uint32_t imageIndex, CmdBuffer* cmdBuffer, VkImageLayout newLayout)
         {
             m_depthBuffer[imageIndex].TransitionLayout(cmdBuffer, newLayout);
+            #ifdef FEATURE_ADD_MSAA
             bool msaa_enable = GetGlobalData().IsUsingMSAA();
             if(msaa_enable){
                 m_depthBufferMSAA[imageIndex].TransitionLayout(cmdBuffer, newLayout);
             }
+            #endif
         }
 
         void Reset() override
@@ -322,8 +334,10 @@ namespace Conformance
                 slice.Reset();
             }
             m_depthBuffer.clear();
+            #ifdef FEATURE_ADD_MSAA
             m_depthBufferMSAA.clear();
             m_colorBufferMSAA.clear();
+            #endif
 
             SwapchainImageDataBase::Reset();
         }
@@ -350,6 +364,7 @@ namespace Conformance
         }
 
     private:
+        #ifdef FEATURE_ADD_MSAA
         void prepareMSAAImages( VkFormat colorFormat, VkFormat depthFormat){
             for (auto& depthBuffer : m_depthBufferMSAA) {
                 depthBuffer.Allocate(m_namer, m_vkDevice, m_memAllocator, depthFormat, this->Width(), this->Height(),
@@ -360,6 +375,7 @@ namespace Conformance
                                      this->ArraySize(), 4);
             }
         }
+        #endif
 
         VulkanDebugObjectNamer m_namer;
         VkDevice m_vkDevice{VK_NULL_HANDLE};
@@ -367,8 +383,10 @@ namespace Conformance
         VkExtent2D m_size{};
         VkSampleCountFlagBits m_sampleCount;
         std::vector<DepthBuffer> m_depthBuffer;  // per swapchain index
+        #ifdef FEATURE_ADD_MSAA
         std::vector<DepthBuffer> m_depthBufferMSAA;
         std::vector<ColorBuffer> m_colorBufferMSAA;
+        #endif
         VkFormat m_depthFormat{VK_FORMAT_D32_SFLOAT};
 
         std::vector<VulkanArraySliceState> m_slices;
@@ -1151,6 +1169,7 @@ namespace Conformance
                 extensions.push_back(createInfo->vulkanCreateInfo->ppEnabledExtensionNames[i]);
             }
 
+            #ifdef FEATURE_ADD_MSAA
             bool msaa_enable = GetGlobalData().IsUsingMSAA();
             if(msaa_enable){
                 extensions.push_back("VK_KHR_multiview");
@@ -1158,6 +1177,8 @@ namespace Conformance
                 extensions.push_back("VK_KHR_create_renderpass2");
                 extensions.push_back("VK_KHR_depth_stencil_resolve");
             }
+            #endif
+
 
             VkPhysicalDeviceFeatures features{};
             memcpy(&features, createInfo->vulkanCreateInfo->pEnabledFeatures, sizeof(features));
@@ -1179,6 +1200,7 @@ namespace Conformance
 
             auto pfnCreateDevice = (PFN_vkCreateDevice)createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkCreateDevice");
             *vulkanResult = pfnCreateDevice(m_vkPhysicalDevice, &deviceInfo, createInfo->vulkanAllocator, vulkanDevice);
+            ALOGE("%s:xxxxxx:vulkanDevice:%p", *vulkanDevice);
         }
 
         return XR_SUCCESS;
@@ -1306,7 +1328,7 @@ namespace Conformance
             }
 
             std::vector<const char*> layers;
-#if !defined(NDEBUG)
+//#if !defined(NDEBUG)
             auto GetValidationLayerName = []() -> const char* {
                 uint32_t layerCount;
                 vkEnumerateInstanceLayerProperties(&layerCount, nullptr);
@@ -1329,7 +1351,7 @@ namespace Conformance
                 layers.push_back(validationLayerName);
             else
                 ReportF("No Vulkan validation layers found, running without them");
-#endif
+//#endif
 #if defined(USE_CHECKPOINTS)
             layers.push_back("VK_NV_device_diagnostic_checkpoints");
 #endif
@@ -1374,6 +1396,8 @@ namespace Conformance
 
         vkCreateRenderPass2KHR =
             (PFN_vkCreateRenderPass2KHR)vkGetInstanceProcAddr(m_vkInstance, "vkCreateRenderPass2KHR");
+        ALOGE("%s:xxxxxx:vkCreateRenderPass2KHR:%p", __func__, vkCreateRenderPass2KHR);
+
 
         XrVulkanGraphicsDeviceGetInfoKHR deviceGetInfo{XR_TYPE_VULKAN_GRAPHICS_DEVICE_GET_INFO_KHR};
         deviceGetInfo.systemId = systemId;
@@ -1424,6 +1448,11 @@ namespace Conformance
         XRC_CHECK_THROW_XRCMD(CreateVulkanDeviceKHR(instance, &deviceCreateInfo, &m_vkDevice, &err));
         XRC_CHECK_THROW_VKCMD(err);
 
+        ALOGE("%s:xxxxxx:m_vkDevice:%p", __func__, m_vkDevice);
+
+        VkPhysicalDeviceProperties props;
+        vkGetPhysicalDeviceProperties(m_vkPhysicalDevice, &props);
+        ALOGE("xxxxxx:Max push constants size: %u", props.limits.maxPushConstantsSize);
         m_namer.Init(m_vkInstance, m_vkDevice);
 
         vkGetDeviceQueue(m_vkDevice, queueInfo.queueFamilyIndex, 0, &m_vkQueue);
@@ -1466,8 +1495,10 @@ namespace Conformance
 #ifdef USE_ONLINE_VULKAN_SHADERC
         auto vertexSPIRV = CompileGlslShader("vertex", shaderc_glsl_default_vertex_shader, VertexShaderGlsl);
         auto fragmentSPIRV = CompileGlslShader("fragment", shaderc_glsl_default_fragment_shader, FragmentShaderGlsl);
+        #ifdef FEATURE_ADD_MOTION_VECTOR
         auto mvVertexSPIRV = CompileGlslShader("vertex", shaderc_glsl_default_vertex_shader, VertexShaderMotionVectorGlsl);
         auto mvFragmentSPIRV = CompileGlslShader("fragment", shaderc_glsl_default_fragment_shader, FragmentShaderMotionVectorGlsl);
+        #endif
 #else
         std::vector<uint32_t> vertexSPIRV = SPV_PREFIX
 #include "vert.spv"  // IWYU pragma: keep
@@ -1480,12 +1511,14 @@ namespace Conformance
 #include "comp.spv"  // IWYU pragma: keep
             SPV_SUFFIX;
 #endif
+        #ifdef FEATURE_ADD_MOTION_VECTOR
         std::vector<uint32_t> mvVertexSPIRV = SPV_PREFIX
 #include "mvvert.spv"  // IWYU pragma: keep
             SPV_SUFFIX;
         std::vector<uint32_t> mvFragmentSPIRV = SPV_PREFIX
 #include "mvfrag.spv"  // IWYU pragma: keep
             SPV_SUFFIX;
+        #endif
 
 
         if (vertexSPIRV.empty())
@@ -1499,9 +1532,12 @@ namespace Conformance
         m_shaderProgram.LoadVertexShader(vertexSPIRV);
         m_shaderProgram.LoadFragmentShader(fragmentSPIRV);
 
+        #ifdef FEATURE_ADD_MOTION_VECTOR
+        ALOGE("%s:xxxxxx:1:%d,2:%d", __func__, vertexSPIRV.size(), mvVertexSPIRV.size());
         m_mvShaderProgram.Init(m_vkDevice);
         m_mvShaderProgram.LoadVertexShader(mvVertexSPIRV);
         m_mvShaderProgram.LoadFragmentShader(mvFragmentSPIRV);
+        #endif
 
         m_computeShaderProgram.Init(m_vkDevice);
         m_computeShaderProgram.LoadComputeShader(computeSPIRV);
@@ -1596,7 +1632,9 @@ namespace Conformance
             m_pipelineLayout.Reset();
             m_computePipelineLayout.Reset();
             m_shaderProgram.Reset();
+        #ifdef FEATURE_ADD_MOTION_VECTOR
             m_mvShaderProgram.Reset();
+        #endif
 
             m_computeShaderProgram.Reset();
             m_memAllocator.Reset();
@@ -1945,6 +1983,11 @@ namespace Conformance
         size_t size, const XrSwapchainCreateInfo& colorSwapchainCreateInfo, XrSwapchain depthSwapchain,
         const XrSwapchainCreateInfo& depthSwapchainCreateInfo, bool isMotionVector)
     {
+        ALOGE("%s:xxxxxx:%d", __func__, isMotionVector);
+        #ifndef FEATURE_ADD_MOTION_VECTOR
+        isMotionVector = 0;
+        #endif
+
         if(!isMotionVector){
         auto typedResult = std::make_unique<VulkanSwapchainImageData>(
             m_namer, uint32_t(size), colorSwapchainCreateInfo, depthSwapchain, depthSwapchainCreateInfo, m_vkDevice, &m_memAllocator,
@@ -2194,6 +2237,10 @@ namespace Conformance
             {VK_IMAGE_ASPECT_COLOR_BIT, 0, clearValues[0]},
             {secondAttachmentAspect, 0, clearValues[1]},
         }};
+
+        // imageArrayIndex already included in the VkImageView
+        VkClearRect clearRect{renderArea, 0, 1};
+        #ifdef FEATURE_ADD_MSAA
         bool msaa_enable = GetGlobalData().IsUsingMSAA();
         if(msaa_enable){
             clearValues[2].color.float32[0] = color.r;
@@ -2205,15 +2252,13 @@ namespace Conformance
 
             clearAttachments[2] = {VK_IMAGE_ASPECT_COLOR_BIT, 0, clearValues[0]};
             clearAttachments[3] = {secondAttachmentAspect, 0, clearValues[1]};
-        }
-
-        // imageArrayIndex already included in the VkImageView
-        VkClearRect clearRect{renderArea, 0, 1};
-        if(msaa_enable){
             vkCmdClearAttachments(m_cmdBuffer.buf, 4, &clearAttachments[0], 1, &clearRect);
         } else {
             vkCmdClearAttachments(m_cmdBuffer.buf, 2, &clearAttachments[0], 1, &clearRect);
         }
+        #else
+        vkCmdClearAttachments(m_cmdBuffer.buf, 2, &clearAttachments[0], 1, &clearRect);
+        #endif
 
         vkCmdEndRenderPass(m_cmdBuffer.buf);
 
@@ -2260,6 +2305,11 @@ namespace Conformance
     {
         VulkanSwapchainImageData* swapchainData;
         uint32_t imageIndex;
+
+        ALOGE("%s:xxxxxx:%d", __func__, isMotionVectorPass);
+        #ifndef FEATURE_ADD_MOTION_VECTOR
+        isMotionVectorPass = 0;
+        #endif
 
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(colorSwapchainImage);
 
@@ -2325,9 +2375,10 @@ namespace Conformance
             XrMatrix4x4f model =
                 Matrix::FromTranslationRotationScale(mesh.params.pose.position, mesh.params.pose.orientation, mesh.params.scale);
             VulkanUniformBuffer ubuf;
+            ALOGE("%s:xxxxxx:%d", __func__, sizeof(VulkanUniformBuffer));
             ubuf.tintColor = mesh.tintColor;
             ubuf.mvp = vp * model;
-            ubuf.alpha = mesh.alpha;
+            ubuf.alpha.x = mesh.alpha;
             vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
 
             CHECKPOINT();
@@ -2401,16 +2452,15 @@ namespace Conformance
                 XrMatrix4x4f modelPrev =
                     Matrix::FromTranslationRotationScale(mesh.params.posePrev.position, mesh.params.posePrev.orientation, mesh.params.scalePrev);
 
-                VulkanUniformBuffer ubuf;
-                ubuf.tintColor = mesh.tintColor;
-                ubuf.mvp = vp * model;
+                VulkanUniformBufferMV ubuf;
+                //#ifdef FEATURE_ADD_MOTION_VECTOR
                 ubuf.vp = vp;
                 ubuf.prevVp = vpPrev;
                 ubuf.model = model;
                 ubuf.prevModel = modelPrev;
-                ubuf.alpha = mesh.alpha;
+                //#endif
 
-                vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
+                vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBufferMV), &ubuf);
 
                 CHECKPOINT();
 

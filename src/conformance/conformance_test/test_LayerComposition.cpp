@@ -1392,6 +1392,7 @@ namespace Conformance
 
     TEST_CASE("ProjectionDepth", "[xxxxxx]")
     {
+        ALOGE("Test Case:ProjectionDepth");
         GlobalData& globalData = GetGlobalData();
         if (!globalData.IsUsingGraphicsPlugin()) {
             SKIP("Cannot test without a graphics plugin");
@@ -1527,6 +1528,7 @@ namespace Conformance
 
     TEST_CASE("ProjectionDepthWithVST", "[xxxxxx][VST]")
     {
+        ALOGE("Test Case:ProjectionDepthWithVST");
         GlobalData& globalData = GetGlobalData();
         if (!globalData.IsUsingGraphicsPlugin()) {
             SKIP("Cannot test without a graphics plugin");
@@ -1707,6 +1709,7 @@ namespace Conformance
     TEST_CASE("ProjectionDepthAppSW", "[xxxxxx][AppSW]")
     {
         GlobalData& globalData = GetGlobalData();
+        ALOGE("Test Case:ProjectionDepthAppSW");
         if (!globalData.IsUsingGraphicsPlugin()) {
             SKIP("Cannot test without a graphics plugin");
         }
@@ -1862,6 +1865,7 @@ namespace Conformance
                 const auto& views = std::get<std::vector<XrView>>(viewData);
 
                 for (int layer = 0; layer < LayerCount; layer++) {
+                    ALOGE("first pass begin %d", layer);
                     for (size_t j = 0; j < views.size(); j++) {
                         // Render into each view's swapchain using the projection layer view fov and pose.
                         compositionHelper.AcquireWaitReleaseImage(
@@ -1881,6 +1885,7 @@ namespace Conformance
 
                     //do motion vector pass if layer appsw is enable
                     if(layer == 1){
+                        ALOGE("motionvector pass begin %d", layer);
                         for (size_t j = 0; j < views.size(); j++) {
                             // Render into each view's swapchain using the projection layer view fov and pose.
 
@@ -1896,12 +1901,14 @@ namespace Conformance
                                         prevProjView[j] = projLayers[layer]->views[j];
                                     }
 
+                                    ALOGE("view %d", j);
                                     GetGlobalData().graphicsPlugin->RenderView(projLayers[layer]->views[j], swapchainImage,
                                                                             RenderParams().Draw(cubes[layer]), true, &prevProjView[j]);
                                 });
 
                             prevProjView[j] = projLayers[layer]->views[j];
                         }
+                        ALOGE("motionvector pass end %d", layer);
                         isFirstFrame = false;
                     }
 

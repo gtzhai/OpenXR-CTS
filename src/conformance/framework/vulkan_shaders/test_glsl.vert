@@ -11,12 +11,12 @@
 layout (std140, push_constant) uniform buf
 {
     mat4 mvp;
-    mat4 p0;
-    mat4 p1;
+    mat4 vp;
+    mat4 prevVp;
+    mat4 model;
+    mat4 prevModel;
     vec4 tintColor;
     vec4 alpha;
-    vec4 p2;
-    vec4 p3;
 } ubuf;
 
 layout (location = 0) in vec3 Position;
