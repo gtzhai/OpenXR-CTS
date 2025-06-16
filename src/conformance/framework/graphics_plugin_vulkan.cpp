@@ -2250,8 +2250,8 @@ namespace Conformance
             clearValues[3].depthStencil.depth = 1.0f;
             clearValues[3].depthStencil.stencil = 0;
 
-            clearAttachments[2] = {VK_IMAGE_ASPECT_COLOR_BIT, 0, clearValues[0]};
-            clearAttachments[3] = {secondAttachmentAspect, 0, clearValues[1]};
+            clearAttachments[2] = {VK_IMAGE_ASPECT_COLOR_BIT, 0, clearValues[2]};
+            clearAttachments[3] = {secondAttachmentAspect, 0, clearValues[3]};
             vkCmdClearAttachments(m_cmdBuffer.buf, 4, &clearAttachments[0], 1, &clearRect);
         } else {
             vkCmdClearAttachments(m_cmdBuffer.buf, 2, &clearAttachments[0], 1, &clearRect);
