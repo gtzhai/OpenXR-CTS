@@ -391,7 +391,7 @@ namespace Conformance
         /// This is a pointer into IPlatformPlugin-provided memory.
         XrBaseInStructure* requiredPlatformInstanceCreateStruct{};
 
-        bool isUsingMSAA{true};
+        bool isUsingMSAA{false};
 
     private:
         VersionDependentDataArray versionDependentData;
