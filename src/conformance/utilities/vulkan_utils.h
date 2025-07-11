@@ -878,6 +878,17 @@ namespace Conformance
                 subpass.pDepthStencilAttachment = &depthRef;
             }
 
+            bool multiview_enable = GetGlobalData().IsUsingMultiview();
+            const uint32_t viewMask = 0b00000011;
+            const uint32_t correlationMask = 0b00000011;
+            VkRenderPassMultiviewCreateInfo renderPassMultiviewCI = {
+                    .sType = VK_STRUCTURE_TYPE_RENDER_PASS_MULTIVIEW_CREATE_INFO,
+                    .subpassCount = 1,
+                    .pViewMasks = &viewMask,
+                    .correlationMaskCount = 1,
+                    .pCorrelationMasks = &correlationMask,
+            };
+
             #ifdef FEATURE_ADD_MSAA
             VkAttachmentReference2 colorRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT};
             VkAttachmentReference2 depthRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT};
@@ -897,6 +908,7 @@ namespace Conformance
             subpass2.pNext = &vkSubpassDescriptionDepthStencilResolve;
             subpass2.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
             subpass2.colorAttachmentCount = 1;
+
 
             if(msaa_enable){
                 usingRP2 = true;
@@ -983,6 +995,11 @@ namespace Conformance
                 rpInfo2.pDependencies = nullptr;
                 rpInfo2.dependencyCount = 0;
 
+                if(multiview_enable){
+                    renderPassMultiviewCI.pNext = rpInfo.pNext;
+                    rpInfo2.pNext = &renderPassMultiviewCI;
+                }
+
                 ALOGE("%s:msaa create render pass", __func__);
 
                 XRC_CHECK_THROW_VKCMD(vkCreateRenderPass2KHR(m_vkDevice, &rpInfo2, nullptr, &pass));
@@ -990,6 +1007,10 @@ namespace Conformance
                 XRC_CHECK_THROW_VKCMD(vkCreateRenderPass(m_vkDevice, &rpInfo, nullptr, &pass));
             }
             #else
+                if(multiview_enable){
+                    renderPassMultiviewCI.pNext = rpInfo.pNext;
+                    rpInfo.pNext = &renderPassMultiviewCI;
+                }
                 XRC_CHECK_THROW_VKCMD(vkCreateRenderPass(m_vkDevice, &rpInfo, nullptr, &pass));
             #endif
 
@@ -1143,12 +1164,13 @@ namespace Conformance
 
             std::array<VkImageView, 4> attachments{};
             uint32_t attachmentCount = 0;
+            bool multiview_enable = GetGlobalData().IsUsingMultiview();
 
             // Create color image view
             if (colorImage != VK_NULL_HANDLE) {
                 VkImageViewCreateInfo colorViewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
                 colorViewInfo.image = colorImage;
-                colorViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                colorViewInfo.viewType = multiview_enable?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D;
                 colorViewInfo.format = renderPass.colorFmt;
                 colorViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
                 colorViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
@@ -1158,7 +1180,7 @@ namespace Conformance
                 colorViewInfo.subresourceRange.baseMipLevel = 0;
                 colorViewInfo.subresourceRange.levelCount = 1;
                 colorViewInfo.subresourceRange.baseArrayLayer = baseArrayLayer;
-                colorViewInfo.subresourceRange.layerCount = 1;
+                colorViewInfo.subresourceRange.layerCount = multiview_enable?2:1;
                 XRC_CHECK_THROW_VKCMD(vkCreateImageView(m_vkDevice, &colorViewInfo, nullptr, &colorView));
                 XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)colorView, "CTS color image view"));
                 attachments[attachmentCount++] = colorView;
@@ -1168,7 +1190,7 @@ namespace Conformance
             if (depthImage != VK_NULL_HANDLE) {
                 VkImageViewCreateInfo depthViewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
                 depthViewInfo.image = depthImage;
-                depthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                depthViewInfo.viewType = multiview_enable?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D;
                 depthViewInfo.format = renderPass.depthFmt;
                 depthViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
                 depthViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
@@ -1178,7 +1200,7 @@ namespace Conformance
                 depthViewInfo.subresourceRange.baseMipLevel = 0;
                 depthViewInfo.subresourceRange.levelCount = 1;
                 depthViewInfo.subresourceRange.baseArrayLayer = baseArrayLayer;
-                depthViewInfo.subresourceRange.layerCount = 1;
+                depthViewInfo.subresourceRange.layerCount = multiview_enable?2:1;
                 XRC_CHECK_THROW_VKCMD(vkCreateImageView(m_vkDevice, &depthViewInfo, nullptr, &depthView));
 
                 const bool isDepth = depthOrStencilImageAspect & VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -1202,7 +1224,7 @@ namespace Conformance
                 if (colorImageResolve != VK_NULL_HANDLE) {
                     VkImageViewCreateInfo colorViewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
                     colorViewInfo.image = colorImageResolve;
-                    colorViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                    colorViewInfo.viewType = multiview_enable?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D;
                     colorViewInfo.format = renderPass.colorFmt;
                     colorViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
                     colorViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
@@ -1212,7 +1234,7 @@ namespace Conformance
                     colorViewInfo.subresourceRange.baseMipLevel = 0;
                     colorViewInfo.subresourceRange.levelCount = 1;
                     colorViewInfo.subresourceRange.baseArrayLayer = baseArrayLayer;
-                    colorViewInfo.subresourceRange.layerCount = 1;
+                    colorViewInfo.subresourceRange.layerCount = multiview_enable?2:1;
                     XRC_CHECK_THROW_VKCMD(vkCreateImageView(m_vkDevice, &colorViewInfo, nullptr, &colorViewResolve));
                     XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)colorViewResolve, "CTS color image resolve view"));
                     attachments[attachmentCount++] = colorViewResolve;
@@ -1222,7 +1244,7 @@ namespace Conformance
                 if (depthImageResolve != VK_NULL_HANDLE) {
                     VkImageViewCreateInfo depthViewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
                     depthViewInfo.image = depthImageResolve;
-                    depthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                    depthViewInfo.viewType = multiview_enable?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D;
                     depthViewInfo.format = renderPass.depthFmt;
                     depthViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
                     depthViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
@@ -1232,7 +1254,7 @@ namespace Conformance
                     depthViewInfo.subresourceRange.baseMipLevel = 0;
                     depthViewInfo.subresourceRange.levelCount = 1;
                     depthViewInfo.subresourceRange.baseArrayLayer = baseArrayLayer;
-                    depthViewInfo.subresourceRange.layerCount = 1;
+                    depthViewInfo.subresourceRange.layerCount = multiview_enable?2:1;
                     XRC_CHECK_THROW_VKCMD(vkCreateImageView(m_vkDevice, &depthViewInfo, nullptr, &depthViewResolve));
 
                     const bool isDepth = depthOrStencilImageAspect & VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -1599,12 +1621,13 @@ namespace Conformance
                       uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount)
         {
             Reset();
+            bool multiview_enable = GetGlobalData().IsUsingMultiview();
 
             m_vkDevice = device;
 
             // Create a D32 depthbuffer
             VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-            imageInfo.imageType = VK_IMAGE_TYPE_2D;
+            imageInfo.imageType = multiview_enable?VK_IMAGE_TYPE_2D_ARRAY:VK_IMAGE_TYPE_2D;
             imageInfo.extent.width = width;
             imageInfo.extent.height = height;
             imageInfo.extent.depth = 1;
@@ -1723,12 +1746,13 @@ namespace Conformance
                       uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount)
         {
             Reset();
+            bool multiview_enable = GetGlobalData().IsUsingMultiview();
 
             m_vkDevice = device;
 
             // Create a D32 colorbuffer
             VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-            imageInfo.imageType = VK_IMAGE_TYPE_2D;
+            imageInfo.imageType = multiview_enable?VK_IMAGE_TYPE_2D_ARRAY:VK_IMAGE_TYPE_2D;
             imageInfo.extent.width = width;
             imageInfo.extent.height = height;
             imageInfo.extent.depth = 1;

@@ -210,7 +210,8 @@ namespace Conformance
         ///
         /// Some RGBA format will be chosen if @p format is not specified.
         XrSwapchainCreateInfo DefaultColorSwapchainCreateInfo(uint32_t width, uint32_t height, XrSwapchainCreateFlags createFlags = 0,
-                                                              int64_t format = -1);
+                                                              int64_t format = -1, int arraySize = 1);
+
 
         /// Return the XrSwapchainCreateInfo for a basic depth swapchain of given width and height, with optional arguments.
         ///
@@ -218,7 +219,8 @@ namespace Conformance
         ///
         /// Some depth format will be chosen if @p format is not specified.
         XrSwapchainCreateInfo DefaultDepthSwapchainCreateInfo(uint32_t width, uint32_t height, XrSwapchainCreateFlags createFlags = 0,
-                                                              int64_t format = -1);
+                                                              int64_t format = -1, int arraySize = 1);
+
 
         /// Create a swapchain image handled by this class.
         ///

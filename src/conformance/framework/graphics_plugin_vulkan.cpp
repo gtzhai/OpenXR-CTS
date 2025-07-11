@@ -799,7 +799,8 @@ namespace Conformance
         Pbr::ModelInstance& GetModelInstance(GLTFModelInstanceHandle handle) override;
 
         void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* colorSwapchainImage,
-                        const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr) override;
+                        const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr,
+                        const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr) override;
 
         void RenderClearImageSliceCompute(const XrCompositionLayerProjectionView& layerView,
                                           const XrSwapchainImageBaseHeader* colorSwapchainImage, XrColor4f color) override;
@@ -853,6 +854,7 @@ namespace Conformance
         ShaderProgram m_shaderProgram{SHADER_PROGRAM_TYPE_GRAPHICS};
         ShaderProgram m_computeShaderProgram{SHADER_PROGRAM_TYPE_COMPUTE};
         ShaderProgram m_mvShaderProgram{SHADER_PROGRAM_TYPE_GRAPHICS};
+        ShaderProgram m_multiviewShaderProgram{SHADER_PROGRAM_TYPE_GRAPHICS};
         CmdBuffer m_cmdBuffer{};
         PipelineLayout m_pipelineLayout{};
 
@@ -1086,6 +1088,11 @@ namespace Conformance
             instInfo.enabledExtensionCount = (uint32_t)extensions.size();
             instInfo.ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data();
 
+            bool multiview_enable = GetGlobalData().IsUsingMultiview();
+            if(multiview_enable){
+                extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+            }
+
             auto pfnCreateInstance = (PFN_vkCreateInstance)createInfo->pfnGetInstanceProcAddr(nullptr, "vkCreateInstance");
             *vulkanResult = pfnCreateInstance(&instInfo, createInfo->vulkanAllocator, vulkanInstance);
         }
@@ -1179,9 +1186,51 @@ namespace Conformance
             }
             #endif
 
+            bool multiview_enable = GetGlobalData().IsUsingMultiview();
+            if(multiview_enable){
+                deviceExtensions.push_back("VK_KHR_multiview");
+            }
 
             VkPhysicalDeviceFeatures features{};
             memcpy(&features, createInfo->vulkanCreateInfo->pEnabledFeatures, sizeof(features));
+
+            VkPhysicalDeviceMultiviewFeaturesKHR physicalDeviceMultiviewFeatures = {};
+            if(multiview_enable)
+            {
+                VkPhysicalDeviceFeatures2KHR deviceFeatures2{};
+                VkPhysicalDeviceMultiviewFeaturesKHR extFeatures{};
+                extFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES_KHR;
+                deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR;
+                deviceFeatures2.pNext = &extFeatures;
+                PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceFeatures2KHR"));
+                vkGetPhysicalDeviceFeatures2KHR(m_vkPhysicalDevice, &deviceFeatures2);
+                Log::Write(Log::Level::Error, Fmt("Multiview features:\tmultiview = %d, multiviewGeometryShader = %d, multiviewTessellationShader = %d \n", extFeatures.multiview
+                ,extFeatures.multiviewGeometryShader, extFeatures.multiviewTessellationShader));
+
+                if (!extFeatures.multiview) {
+                    Log::Write(Log::Level::Error,("multiview not supported"));
+                    return XR_ERROR_RUNTIME_FAILURE;
+                }
+
+                VkPhysicalDeviceProperties2KHR deviceProps2{};
+                VkPhysicalDeviceMultiviewPropertiesKHR extProps{};
+                extProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES_KHR;
+                deviceProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+                deviceProps2.pNext = &extProps;
+                PFN_vkGetPhysicalDeviceProperties2KHR vkGetPhysicalDeviceProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2KHR>(createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceProperties2KHR"));
+                vkGetPhysicalDeviceProperties2KHR(m_vkPhysicalDevice, &deviceProps2);
+                Log::Write(Log::Level::Error, Fmt("Multiview properties:\n""\tmaxMultiviewViewCount = %d" "\tmaxMultiviewInstanceIndex = %d\n", extProps.maxMultiviewViewCount, extProps.maxMultiviewInstanceIndex));
+                if (extProps.maxMultiviewViewCount < 2) {
+                    Log::Write(Log::Level::Error,("multiview not supported 2"));
+                    return XR_ERROR_RUNTIME_FAILURE;
+                }
+
+                // Enable extension required for multiview.
+                extensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
+                physicalDeviceMultiviewFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES_KHR;
+                physicalDeviceMultiviewFeatures.multiview = VK_TRUE;
+                physicalDeviceMultiviewFeatures.pNext = NULL;
+            }
 
 #if !defined(XR_USE_PLATFORM_ANDROID)
             VkPhysicalDeviceFeatures availableFeatures{};
@@ -1197,6 +1246,9 @@ namespace Conformance
             deviceInfo.pEnabledFeatures = &features;
             deviceInfo.enabledExtensionCount = (uint32_t)extensions.size();
             deviceInfo.ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data();
+            if(multiview_enable){
+                deviceInfo.pNext = &physicalDeviceMultiviewFeatures;
+            }
 
             auto pfnCreateDevice = (PFN_vkCreateDevice)createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkCreateDevice");
             *vulkanResult = pfnCreateDevice(m_vkPhysicalDevice, &deviceInfo, createInfo->vulkanAllocator, vulkanDevice);
@@ -1327,6 +1379,11 @@ namespace Conformance
                 // TODO add back VK_EXT_debug_report code for compatibility with older systems? (Android)
             }
 
+            bool multiview_enable = GetGlobalData().IsUsingMultiview();
+            if(multiview_enable){
+                extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
+            }
+
             std::vector<const char*> layers;
 //#if !defined(NDEBUG)
             auto GetValidationLayerName = []() -> const char* {
@@ -1429,6 +1486,45 @@ namespace Conformance
         // Setting this quiets down a validation error triggered by the Oculus runtime
         // features.shaderStorageImageMultisample = VK_TRUE;
 
+        VkPhysicalDeviceMultiviewFeaturesKHR physicalDeviceMultiviewFeatures = {};
+        if(multiview_enable)
+        {
+            VkPhysicalDeviceFeatures2KHR deviceFeatures2{};
+            VkPhysicalDeviceMultiviewFeaturesKHR extFeatures{};
+            extFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES_KHR;
+            deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR;
+            deviceFeatures2.pNext = &extFeatures;
+            PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceFeatures2KHR"));
+            vkGetPhysicalDeviceFeatures2KHR(m_vkPhysicalDevice, &deviceFeatures2);
+            Log::Write(Log::Level::Error, Fmt("Multiview features:\tmultiview = %d, multiviewGeometryShader = %d, multiviewTessellationShader = %d \n", extFeatures.multiview
+            ,extFeatures.multiviewGeometryShader, extFeatures.multiviewTessellationShader));
+
+            if (!extFeatures.multiview) {
+                Log::Write(Log::Level::Error,("multiview not supported"));
+                return XR_ERROR_RUNTIME_FAILURE;
+            }
+
+            VkPhysicalDeviceProperties2KHR deviceProps2{};
+            VkPhysicalDeviceMultiviewPropertiesKHR extProps{};
+            extProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES_KHR;
+            deviceProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
+            deviceProps2.pNext = &extProps;
+            PFN_vkGetPhysicalDeviceProperties2KHR vkGetPhysicalDeviceProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2KHR>(createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceProperties2KHR"));
+            vkGetPhysicalDeviceProperties2KHR(m_vkPhysicalDevice, &deviceProps2);
+            Log::Write(Log::Level::Error, Fmt("Multiview properties:\n""\tmaxMultiviewViewCount = %d" "\tmaxMultiviewInstanceIndex = %d\n", extProps.maxMultiviewViewCount, extProps.maxMultiviewInstanceIndex));
+            if (extProps.maxMultiviewViewCount < 2) {
+                Log::Write(Log::Level::Error,("multiview not supported 2"));
+                return XR_ERROR_RUNTIME_FAILURE;
+            }
+
+            // Enable extension required for multiview.
+            extensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
+            physicalDeviceMultiviewFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES_KHR;
+            physicalDeviceMultiviewFeatures.multiview = VK_TRUE;
+            physicalDeviceMultiviewFeatures.pNext = NULL;
+        }
+
+
         VkDeviceCreateInfo deviceInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
         deviceInfo.flags = VkDeviceCreateFlags(deviceCreationFlags);
         deviceInfo.queueCreateInfoCount = 1;
@@ -1438,6 +1534,10 @@ namespace Conformance
         deviceInfo.enabledExtensionCount = (uint32_t)deviceExtensions.size();
         deviceInfo.ppEnabledExtensionNames = deviceExtensions.empty() ? nullptr : deviceExtensions.data();
         deviceInfo.pEnabledFeatures = &features;
+
+        if(multiview_enable){
+            deviceInfo.pNext = &physicalDeviceMultiviewFeatures;
+        }
 
         XrVulkanDeviceCreateInfoKHR deviceCreateInfo{XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR};
         deviceCreateInfo.systemId = systemId;
@@ -1520,6 +1620,12 @@ namespace Conformance
             SPV_SUFFIX;
         #endif
 
+        std::vector<uint32_t> multiviewVertexSPIRV = SPV_PREFIX
+#include "multiviewvert.spv"  // IWYU pragma: keep
+            SPV_SUFFIX;
+        std::vector<uint32_t> multiviewFragmentSPIRV = SPV_PREFIX
+#include "multiviewfrag.spv"  // IWYU pragma: keep
+            SPV_SUFFIX;
 
         if (vertexSPIRV.empty())
             XRC_THROW("Failed to compile vertex shader");
@@ -1538,6 +1644,12 @@ namespace Conformance
         m_mvShaderProgram.LoadVertexShader(mvVertexSPIRV);
         m_mvShaderProgram.LoadFragmentShader(mvFragmentSPIRV);
         #endif
+
+        m_multiviewShaderProgram
+        ALOGE("%s:xxxxxx:3:%d,2:%d", __func__, multiviewVertexSPIRV.size(), multiviewFragmentSPIRV.size());
+        m_multiviewShaderProgram.Init(m_vkDevice);
+        m_multiviewShaderProgram.LoadVertexShader(multiviewVertexSPIRV);
+        m_multiviewShaderProgram.LoadFragmentShader(multiviewFragmentSPIRV);
 
         m_computeShaderProgram.Init(m_vkDevice);
         m_computeShaderProgram.LoadComputeShader(computeSPIRV);
@@ -1635,6 +1747,8 @@ namespace Conformance
         #ifdef FEATURE_ADD_MOTION_VECTOR
             m_mvShaderProgram.Reset();
         #endif
+            m_multiviewShaderProgram.Reset();
+
 
             m_computeShaderProgram.Reset();
             m_memAllocator.Reset();
@@ -1983,23 +2097,36 @@ namespace Conformance
         size_t size, const XrSwapchainCreateInfo& colorSwapchainCreateInfo, XrSwapchain depthSwapchain,
         const XrSwapchainCreateInfo& depthSwapchainCreateInfo, bool isMotionVector)
     {
-        ALOGE("%s:xxxxxx:%d", __func__, isMotionVector);
+        bool multiview_enable = GetGlobalData().IsUsingMultiview();
+        ALOGE("%s:xxxxxx:%d,%d", __func__, isMotionVector, multiview_enable);
         #ifndef FEATURE_ADD_MOTION_VECTOR
         isMotionVector = 0;
         #endif
 
         if(!isMotionVector){
-        auto typedResult = std::make_unique<VulkanSwapchainImageData>(
-            m_namer, uint32_t(size), colorSwapchainCreateInfo, depthSwapchain, depthSwapchainCreateInfo, m_vkDevice, &m_memAllocator,
-            m_pipelineLayout, m_computePipelineLayout, m_shaderProgram, m_computeShaderProgram, VulkanMesh::c_bindingDesc,
-            VulkanMesh::c_attrDesc);
+            if(multiview_enable){
+                auto typedResult = std::make_unique<VulkanSwapchainImageData>(
+                    m_namer, uint32_t(size), colorSwapchainCreateInfo, depthSwapchain, depthSwapchainCreateInfo, m_vkDevice, &m_memAllocator,
+                    m_pipelineLayout, m_computePipelineLayout, m_shaderProgram, m_computeShaderProgram, VulkanMesh::c_bindingDesc,
+                    VulkanMesh::c_attrDesc);
 
-        // Cast our derived type to the caller-expected type.
-        auto ret = static_cast<ISwapchainImageData*>(typedResult.get());
+                // Cast our derived type to the caller-expected type.
+                auto ret = static_cast<ISwapchainImageData*>(typedResult.get());
 
-        m_swapchainImageDataMap.Adopt(std::move(typedResult));
+                m_swapchainImageDataMap.Adopt(std::move(typedResult));
+                return ret;
+            } else {
+                auto typedResult = std::make_unique<VulkanSwapchainImageData>(
+                    m_namer, uint32_t(size), colorSwapchainCreateInfo, depthSwapchain, depthSwapchainCreateInfo, m_vkDevice, &m_memAllocator,
+                    m_pipelineLayout, m_computePipelineLayout, m_multiviewShaderProgram, m_computeShaderProgram, VulkanMesh::c_bindingDesc,
+                    VulkanMesh::c_attrDesc);
 
-        return ret;
+                // Cast our derived type to the caller-expected type.
+                auto ret = static_cast<ISwapchainImageData*>(typedResult.get());
+
+                m_swapchainImageDataMap.Adopt(std::move(typedResult));
+                return ret;
+            }
         } else {
             auto typedResult = std::make_unique<VulkanSwapchainImageData>(
                 m_namer, uint32_t(size), colorSwapchainCreateInfo, depthSwapchain, depthSwapchainCreateInfo, m_vkDevice, &m_memAllocator,
@@ -2300,11 +2427,13 @@ namespace Conformance
     }
 
     void VulkanGraphicsPlugin::RenderView(const XrCompositionLayerProjectionView& layerView,
-                                          const XrSwapchainImageBaseHeader* colorSwapchainImage, const RenderParams& params, bool isMotionVectorPass, const XrCompositionLayerProjectionView* prevLayerView)
+                                          const XrSwapchainImageBaseHeader* colorSwapchainImage, const RenderParams& params, bool isMotionVectorPass, const XrCompositionLayerProjectionView* prevLayerView, 
+                                          const XrCompositionLayerProjectionView* nextLayerView, const XrCompositionLayerProjectionView* nextPrevLayerView)
 
     {
         VulkanSwapchainImageData* swapchainData;
         uint32_t imageIndex;
+        bool multiview_enable = GetGlobalData().IsUsingMultiview();
 
         ALOGE("%s:xxxxxx:%d", __func__, isMotionVectorPass);
         #ifndef FEATURE_ADD_MOTION_VECTOR
@@ -2344,75 +2473,164 @@ namespace Conformance
         CHECKPOINT();
 
         if(!isMotionVectorPass){
-        // Compute the view-projection transform.
-        // Note all matrixes (including OpenXR's) are column-major, right-handed.
-        const auto& pose = layerView.pose;
-        XrMatrix4x4f proj;
-        XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_VULKAN, layerView.fov, 0.05f, 100.0f);
-        XrMatrix4x4f toView = Matrix::FromPose(pose);
-        XrMatrix4x4f view = Matrix::InvertRigidBody(toView);
-        XrMatrix4x4f vp = proj * view;
-        MeshHandle lastMeshHandle;
+            if(!multiview_enable){
+                // Compute the view-projection transform.
+                // Note all matrixes (including OpenXR's) are column-major, right-handed.
+                const auto& pose = layerView.pose;
+                XrMatrix4x4f proj;
+                XrMatrix4x4f_CreateProjectionFov(&proj, GRAPHICS_VULKAN, layerView.fov, 0.05f, 100.0f);
+                XrMatrix4x4f toView = Matrix::FromPose(pose);
+                XrMatrix4x4f view = Matrix::InvertRigidBody(toView);
+                XrMatrix4x4f vp = proj * view;
+                MeshHandle lastMeshHandle;
 
-        const auto drawMesh = [this, &vp, &lastMeshHandle](const MeshDrawable mesh) {
-            VulkanMesh& vkMesh = m_meshes[mesh.handle];
-            if (mesh.handle != lastMeshHandle) {
-                // We are now rendering a new mesh
+                const auto drawMesh = [this, &vp, &lastMeshHandle](const MeshDrawable mesh) {
+                    VulkanMesh& vkMesh = m_meshes[mesh.handle];
+                    if (mesh.handle != lastMeshHandle) {
+                        // We are now rendering a new mesh
 
-                // Bind index and vertex buffers
-                vkCmdBindIndexBuffer(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.idx.buf, 0, VK_INDEX_TYPE_UINT16);
+                        // Bind index and vertex buffers
+                        vkCmdBindIndexBuffer(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.idx.buf, 0, VK_INDEX_TYPE_UINT16);
 
-                CHECKPOINT();
+                        CHECKPOINT();
 
-                VkDeviceSize offset = 0;
-                vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &vkMesh.m_DrawBuffer.vtx.buf, &offset);
+                        VkDeviceSize offset = 0;
+                        vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &vkMesh.m_DrawBuffer.vtx.buf, &offset);
 
-                CHECKPOINT();
-                lastMeshHandle = mesh.handle;
+                        CHECKPOINT();
+                        lastMeshHandle = mesh.handle;
+                    }
+
+                    // Compute the model-view-projection transform and push it.
+                    XrMatrix4x4f model =
+                        Matrix::FromTranslationRotationScale(mesh.params.pose.position, mesh.params.pose.orientation, mesh.params.scale);
+                    VulkanUniformBuffer ubuf;
+                    ALOGE("%s:xxxxxx:%d", __func__, sizeof(VulkanUniformBuffer));
+                    ubuf.tintColor = mesh.tintColor;
+                    ubuf.mvp = vp * model;
+                    ubuf.alpha.x = mesh.alpha;
+                    vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
+
+                    CHECKPOINT();
+
+                    // Draw the mesh.
+                    vkCmdDrawIndexed(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.count.idx, 1, 0, 0, 0);
+
+                    CHECKPOINT();
+                };
+
+                // Render each cube
+                for (const Cube& cube : params.cubes) {
+                    drawMesh(MeshDrawable{m_cubeMesh, cube.params.pose, cube.params.scale, cube.tintColor, cube.alpha});
+                }
+
+                // Render each mesh
+                for (const auto& mesh : params.meshes) {
+                    drawMesh(mesh);
+                }
+
+                // Render each gltf
+                for (const auto& gltfDrawable : params.glTFs) {
+                    VulkanGLTF& gltf = m_gltfInstances[gltfDrawable.handle];
+                    // Compute and update the model transform.
+
+                    XrMatrix4x4f modelToWorld = Matrix::FromTranslationRotationScale(
+                        gltfDrawable.params.pose.position, gltfDrawable.params.pose.orientation, gltfDrawable.params.scale);
+                    // XrMatrix4x4f viewMatrix = Matrix::FromPose(layerView.pose);
+                    // XrMatrix4x4f viewMatrixInverse = Matrix::InvertRigidBody(viewMatrix);
+                    m_pbrResources->SetViewProjection(view, proj);
+
+                    gltf.Render(m_cmdBuffer, *m_pbrResources, modelToWorld, renderPassBeginInfo.renderPass,
+                                (VkSampleCountFlagBits)swapchainData->GetCreateInfo().sampleCount);
+                }
+
+            } else {
+                // Compute the view-projection transform.
+                // Note all matrixes (including OpenXR's) are column-major, right-handed.
+                int size = 2;
+
+                XrVector3f scale{1.f, 1.f, 1.f};
+                XrMatrix4x4f proj[size];
+                XrMatrix4x4f toView[size];
+                XrMatrix4x4f view[size];
+                XrMatrix4x4f vp[size];
+
+                XrMatrix4x4f_CreateProjectionFov(&proj[0], GRAPHICS_OPENGL_ES, layerView.fov, 0.05f, 100.0f);
+                XrMatrix4x4f_CreateTranslationRotationScale(&toView[0], &layerViews.pose.position, &layerViews.pose.orientation, &scale);
+                XrMatrix4x4f_InvertRigidBody(&view[0], &toView[0]);
+                XrMatrix4x4f_Multiply(&vp[0], &proj[0], &view[0]);
+
+                XrMatrix4x4f_CreateProjectionFov(&proj[1], GRAPHICS_OPENGL_ES, nextLayerView->ov, 0.05f, 100.0f);
+                XrMatrix4x4f_CreateTranslationRotationScale(&toView[1], &nextLayerView->pose.position, &nextLayerView->pose.orientation, &scale);
+                XrMatrix4x4f_InvertRigidBody(&view[1], &toView[1]);
+                XrMatrix4x4f_Multiply(&vp[1], &proj[1], &view[1]);
+                MeshHandle lastMeshHandle;
+
+                const auto drawMesh = [this, &vp, &lastMeshHandle](const MeshDrawable mesh) {
+                    VulkanMesh& vkMesh = m_meshes[mesh.handle];
+                    if (mesh.handle != lastMeshHandle) {
+                        // We are now rendering a new mesh
+
+                        // Bind index and vertex buffers
+                        vkCmdBindIndexBuffer(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.idx.buf, 0, VK_INDEX_TYPE_UINT16);
+
+                        CHECKPOINT();
+
+                        VkDeviceSize offset = 0;
+                        vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &vkMesh.m_DrawBuffer.vtx.buf, &offset);
+
+                        CHECKPOINT();
+                        lastMeshHandle = mesh.handle;
+                    }
+
+                    // Compute the model-view-projection transform and push it.
+                    XrMatrix4x4f model =
+                    Matrix::FromTranslationRotationScale(mesh.params.pose.position, mesh.params.pose.orientation, mesh.params.scale);
+                    XrMatrix4x4f mvp[size];
+                    mvp[0] = vp[0] * model;
+                    mvp[1] = vp[1] * model;
+
+                    VulkanUniformBuffer ubuf;
+                    ALOGE("%s:xxxxxx:%d", __func__, sizeof(VulkanUniformBuffer));
+                    ubuf.tintColor = mesh.tintColor;
+                    ubuf.mvp = mvp[0];
+                    ubuf.p0  = mvp[1];
+                    ubuf.alpha.x = mesh.alpha;
+                    vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
+
+                    CHECKPOINT();
+
+                    // Draw the mesh.
+                    vkCmdDrawIndexed(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.count.idx, 1, 0, 0, 0);
+
+                    CHECKPOINT();
+                };
+
+                // Render each cube
+                for (const Cube& cube : params.cubes) {
+                    drawMesh(MeshDrawable{m_cubeMesh, cube.params.pose, cube.params.scale, cube.tintColor, cube.alpha});
+                }
+
+                // Render each mesh
+                for (const auto& mesh : params.meshes) {
+                    drawMesh(mesh);
+                }
+
+                // Render each gltf
+                for (const auto& gltfDrawable : params.glTFs) {
+                    VulkanGLTF& gltf = m_gltfInstances[gltfDrawable.handle];
+                    // Compute and update the model transform.
+
+                    XrMatrix4x4f modelToWorld = Matrix::FromTranslationRotationScale(
+                        gltfDrawable.params.pose.position, gltfDrawable.params.pose.orientation, gltfDrawable.params.scale);
+                    // XrMatrix4x4f viewMatrix = Matrix::FromPose(layerView.pose);
+                    // XrMatrix4x4f viewMatrixInverse = Matrix::InvertRigidBody(viewMatrix);
+                    m_pbrResources->SetViewProjection(view, proj);
+
+                    gltf.Render(m_cmdBuffer, *m_pbrResources, modelToWorld, renderPassBeginInfo.renderPass,
+                                (VkSampleCountFlagBits)swapchainData->GetCreateInfo().sampleCount);
+                }
             }
-
-            // Compute the model-view-projection transform and push it.
-            XrMatrix4x4f model =
-                Matrix::FromTranslationRotationScale(mesh.params.pose.position, mesh.params.pose.orientation, mesh.params.scale);
-            VulkanUniformBuffer ubuf;
-            ALOGE("%s:xxxxxx:%d", __func__, sizeof(VulkanUniformBuffer));
-            ubuf.tintColor = mesh.tintColor;
-            ubuf.mvp = vp * model;
-            ubuf.alpha.x = mesh.alpha;
-            vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
-
-            CHECKPOINT();
-
-            // Draw the mesh.
-            vkCmdDrawIndexed(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.count.idx, 1, 0, 0, 0);
-
-            CHECKPOINT();
-        };
-
-        // Render each cube
-        for (const Cube& cube : params.cubes) {
-            drawMesh(MeshDrawable{m_cubeMesh, cube.params.pose, cube.params.scale, cube.tintColor, cube.alpha});
-        }
-
-        // Render each mesh
-        for (const auto& mesh : params.meshes) {
-            drawMesh(mesh);
-        }
-
-        // Render each gltf
-        for (const auto& gltfDrawable : params.glTFs) {
-            VulkanGLTF& gltf = m_gltfInstances[gltfDrawable.handle];
-            // Compute and update the model transform.
-
-            XrMatrix4x4f modelToWorld = Matrix::FromTranslationRotationScale(
-                gltfDrawable.params.pose.position, gltfDrawable.params.pose.orientation, gltfDrawable.params.scale);
-            // XrMatrix4x4f viewMatrix = Matrix::FromPose(layerView.pose);
-            // XrMatrix4x4f viewMatrixInverse = Matrix::InvertRigidBody(viewMatrix);
-            m_pbrResources->SetViewProjection(view, proj);
-
-            gltf.Render(m_cmdBuffer, *m_pbrResources, modelToWorld, renderPassBeginInfo.renderPass,
-                        (VkSampleCountFlagBits)swapchainData->GetCreateInfo().sampleCount);
-        }
         } else {
             const auto& pose = layerView.pose;
             XrMatrix4x4f proj;

@@ -483,6 +483,16 @@ namespace Conformance
         return isUsingMSAA;
     }
 
+    bool GlobalData::IsGraphicsPluginVulkan()
+    {
+        return Options::Get().graphicsPlugin.c_str() == "vulkan";
+    }
+
+    bool GlobalData::IsUsingMultiView() const
+    {
+        return isUsingMultiView;
+    }
+
     void GlobalData::PushSwapchainFormat(int64_t format, const std::string& name)
     {
         std::unique_lock<std::recursive_mutex> lock(dataMutex);

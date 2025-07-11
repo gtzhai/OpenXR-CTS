@@ -411,7 +411,9 @@ namespace Conformance
 
         /// Render a list of drawables to a swapchain image. ClearImageSlice must be called first to clear internal state.
         virtual void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* colorSwapchainImage,
-                                const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr) = 0;
+                                const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr, 
+                                const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr) = 0;
+
 
         /// Clears a slice to an arbitrary color with a compute shader. Can only be used with XR_SWAPCHAIN_USAGE_UNORDERED_ACCESS_BIT.
         /// @todo The actual rendering is only implemented for Vulkan. On OpenGL (ES) this is a noop, on D3D11/D3D12 it checks whether the appropriate flags are set.

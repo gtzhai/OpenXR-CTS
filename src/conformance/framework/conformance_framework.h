@@ -322,6 +322,8 @@ namespace Conformance
         void PopulateMinVersionAndEnabledExtensions(FeatureSet& out) const;
 
         bool IsUsingMSAA() const;
+        bool IsUsingMultiView() const;
+        bool IsGraphicsPluginVulkan();
     public:
         /// Guards all member data.
         mutable std::recursive_mutex dataMutex;
@@ -392,6 +394,7 @@ namespace Conformance
         XrBaseInStructure* requiredPlatformInstanceCreateStruct{};
 
         bool isUsingMSAA{false};
+        bool isUsingMultiView{false};
 
     private:
         VersionDependentDataArray versionDependentData;

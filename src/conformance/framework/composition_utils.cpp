@@ -468,14 +468,14 @@ namespace Conformance
 
     XrSwapchainCreateInfo CompositionHelper::DefaultColorSwapchainCreateInfo(uint32_t width, uint32_t height,
                                                                              XrSwapchainCreateFlags createFlags /*= 0*/,
-                                                                             int64_t format /*= -1*/)
+                                                                             int64_t format /*= -1*/, int arraySize /*= 1*/)
     {
         if (format == -1) {  // Is -1 a safe "uninitialized" value?
             format = m_defaultColorFormat;
         }
 
         XrSwapchainCreateInfo createInfo{XR_TYPE_SWAPCHAIN_CREATE_INFO};
-        createInfo.arraySize = 1;
+        createInfo.arraySize = arraySize;
         createInfo.format = format;
         createInfo.width = width;
         createInfo.height = height;
@@ -489,14 +489,14 @@ namespace Conformance
 
     XrSwapchainCreateInfo CompositionHelper::DefaultDepthSwapchainCreateInfo(uint32_t width, uint32_t height,
                                                                              XrSwapchainCreateFlags createFlags /*= 0*/,
-                                                                             int64_t format /*= -1*/)
+                                                                             int64_t format /*= -1*/, int arraySize /*= 1*/)
     {
         if (format == -1) {  // Is -1 a safe "uninitialized" value?
             format = m_defaultDepthFormat;
         }
 
         XrSwapchainCreateInfo createInfo{XR_TYPE_SWAPCHAIN_CREATE_INFO};
-        createInfo.arraySize = 1;
+        createInfo.arraySize = arraySize;
         createInfo.format = format;
         createInfo.width = width;
         createInfo.height = height;
