@@ -198,9 +198,10 @@ namespace Conformance
                   const VkVertexInputBindingDescription& bindDesc, span<const VkVertexInputAttributeDescription> attrDesc)
         {
             bool msaa_enable = GetGlobalData().IsUsingMSAA();
+            bool multiview_enable =  Conformance::GetGlobalData().IsUsingMultiview();
 
             m_renderTarget.resize(capacity);
-            m_rp.Create(namer, device, colorFormat, depthFormat, sampleCount, msaa_enable);
+            m_rp.Create(namer, device, colorFormat, depthFormat, sampleCount, msaa_enable, multiview_enable);
             VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_VIEWPORT};
             m_pipe.Create(device, size, layout, m_rp, sp, bindDesc, attrDesc, dynamicStates);
 
@@ -289,12 +290,15 @@ namespace Conformance
             RenderTarget& rt = m_slices[arraySlice].m_renderTarget[index];
             RenderPass& rp = m_slices[arraySlice].m_rp;
             if (rt.fb == VK_NULL_HANDLE) {
+                bool multiview_enable = GetGlobalData().IsUsingMultiview();
             #ifdef FEATURE_ADD_MSAA
                 rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image, secondAttachmentAspect,
-                          arraySlice, m_size, rp, m_colorBufferMSAA[index].GetTexture().image, m_depthBufferMSAA[index].GetTexture().image, msaa_enable);
+                          arraySlice, m_size, rp, m_colorBufferMSAA[index].GetTexture().image, m_depthBufferMSAA[index].GetTexture().image, 
+                          msaa_enable, multiview_enable);
             #else
                 rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image, secondAttachmentAspect,
-                          arraySlice, m_size, rp, VK_NULL_HANDLE, VK_NULL_HANDLE, false);
+                          arraySlice, m_size, rp, VK_NULL_HANDLE, VK_NULL_HANDLE, 
+                          false, multiview_enable);
             #endif
 
             }
@@ -800,7 +804,8 @@ namespace Conformance
 
         void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* colorSwapchainImage,
                         const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr,
-                        const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr) override;
+                        const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr,
+                     const EnvDepthOcclusionParams* edoParams = nullptr) override;
 
         void RenderClearImageSliceCompute(const XrCompositionLayerProjectionView& layerView,
                                           const XrSwapchainImageBaseHeader* colorSwapchainImage, XrColor4f color) override;
@@ -855,12 +860,16 @@ namespace Conformance
         ShaderProgram m_computeShaderProgram{SHADER_PROGRAM_TYPE_COMPUTE};
         ShaderProgram m_mvShaderProgram{SHADER_PROGRAM_TYPE_GRAPHICS};
         ShaderProgram m_multiviewShaderProgram{SHADER_PROGRAM_TYPE_GRAPHICS};
+        ShaderProgram m_envDepthShaderProgram{SHADER_PROGRAM_TYPE_GRAPHICS};
         CmdBuffer m_cmdBuffer{};
         PipelineLayout m_pipelineLayout{};
 
         PipelineLayout m_computePipelineLayout{};
         Conformance::ScopedVkDescriptorPool m_computeDescriptorPool;
         VkDescriptorSet m_ComputeDescriptorSet;
+
+        Conformance::ScopedVkDescriptorPool m_gfxDescriptorPool;
+        VkDescriptorSet m_gfxDescriptorSet;
 
         MeshHandle m_cubeMesh{};
         VectorWithGenerationCountedHandles<VulkanMesh, MeshHandle> m_meshes;
@@ -1188,7 +1197,7 @@ namespace Conformance
 
             bool multiview_enable = GetGlobalData().IsUsingMultiview();
             if(multiview_enable){
-                deviceExtensions.push_back("VK_KHR_multiview");
+                extensions.push_back("VK_KHR_multiview");
             }
 
             VkPhysicalDeviceFeatures features{};
@@ -1204,11 +1213,9 @@ namespace Conformance
                 deviceFeatures2.pNext = &extFeatures;
                 PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceFeatures2KHR"));
                 vkGetPhysicalDeviceFeatures2KHR(m_vkPhysicalDevice, &deviceFeatures2);
-                Log::Write(Log::Level::Error, Fmt("Multiview features:\tmultiview = %d, multiviewGeometryShader = %d, multiviewTessellationShader = %d \n", extFeatures.multiview
-                ,extFeatures.multiviewGeometryShader, extFeatures.multiviewTessellationShader));
 
                 if (!extFeatures.multiview) {
-                    Log::Write(Log::Level::Error,("multiview not supported"));
+                    ALOGE("multiview not supported");
                     return XR_ERROR_RUNTIME_FAILURE;
                 }
 
@@ -1219,9 +1226,8 @@ namespace Conformance
                 deviceProps2.pNext = &extProps;
                 PFN_vkGetPhysicalDeviceProperties2KHR vkGetPhysicalDeviceProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2KHR>(createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceProperties2KHR"));
                 vkGetPhysicalDeviceProperties2KHR(m_vkPhysicalDevice, &deviceProps2);
-                Log::Write(Log::Level::Error, Fmt("Multiview properties:\n""\tmaxMultiviewViewCount = %d" "\tmaxMultiviewInstanceIndex = %d\n", extProps.maxMultiviewViewCount, extProps.maxMultiviewInstanceIndex));
                 if (extProps.maxMultiviewViewCount < 2) {
-                    Log::Write(Log::Level::Error,("multiview not supported 2"));
+                   ALOGE("multiview not supported 2");
                     return XR_ERROR_RUNTIME_FAILURE;
                 }
 
@@ -1405,7 +1411,10 @@ namespace Conformance
             };
             const char* validationLayerName = GetValidationLayerName();
             if (validationLayerName)
+            {
+                ALOGE("%s:xxxxxx:validationLayerName:%s", __func__, validationLayerName);
                 layers.push_back(validationLayerName);
+            }
             else
                 ReportF("No Vulkan validation layers found, running without them");
 //#endif
@@ -1487,6 +1496,7 @@ namespace Conformance
         // features.shaderStorageImageMultisample = VK_TRUE;
 
         VkPhysicalDeviceMultiviewFeaturesKHR physicalDeviceMultiviewFeatures = {};
+        bool multiview_enable = GetGlobalData().IsUsingMultiview();
         if(multiview_enable)
         {
             VkPhysicalDeviceFeatures2KHR deviceFeatures2{};
@@ -1494,13 +1504,11 @@ namespace Conformance
             extFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES_KHR;
             deviceFeatures2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2_KHR;
             deviceFeatures2.pNext = &extFeatures;
-            PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceFeatures2KHR"));
+            PFN_vkGetPhysicalDeviceFeatures2KHR vkGetPhysicalDeviceFeatures2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceFeatures2KHR>(vkGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceFeatures2KHR"));
             vkGetPhysicalDeviceFeatures2KHR(m_vkPhysicalDevice, &deviceFeatures2);
-            Log::Write(Log::Level::Error, Fmt("Multiview features:\tmultiview = %d, multiviewGeometryShader = %d, multiviewTessellationShader = %d \n", extFeatures.multiview
-            ,extFeatures.multiviewGeometryShader, extFeatures.multiviewTessellationShader));
 
             if (!extFeatures.multiview) {
-                Log::Write(Log::Level::Error,("multiview not supported"));
+                ALOGE("multiview not supported");
                 return XR_ERROR_RUNTIME_FAILURE;
             }
 
@@ -1509,16 +1517,15 @@ namespace Conformance
             extProps.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_PROPERTIES_KHR;
             deviceProps2.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2_KHR;
             deviceProps2.pNext = &extProps;
-            PFN_vkGetPhysicalDeviceProperties2KHR vkGetPhysicalDeviceProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2KHR>(createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceProperties2KHR"));
+            PFN_vkGetPhysicalDeviceProperties2KHR vkGetPhysicalDeviceProperties2KHR = reinterpret_cast<PFN_vkGetPhysicalDeviceProperties2KHR>(vkGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceProperties2KHR"));
             vkGetPhysicalDeviceProperties2KHR(m_vkPhysicalDevice, &deviceProps2);
-            Log::Write(Log::Level::Error, Fmt("Multiview properties:\n""\tmaxMultiviewViewCount = %d" "\tmaxMultiviewInstanceIndex = %d\n", extProps.maxMultiviewViewCount, extProps.maxMultiviewInstanceIndex));
             if (extProps.maxMultiviewViewCount < 2) {
-                Log::Write(Log::Level::Error,("multiview not supported 2"));
+               ALOGE("multiview not supported 2");
                 return XR_ERROR_RUNTIME_FAILURE;
             }
 
             // Enable extension required for multiview.
-            extensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
+            deviceExtensions.push_back(VK_KHR_MULTIVIEW_EXTENSION_NAME);
             physicalDeviceMultiviewFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MULTIVIEW_FEATURES_KHR;
             physicalDeviceMultiviewFeatures.multiview = VK_TRUE;
             physicalDeviceMultiviewFeatures.pNext = NULL;
@@ -1627,6 +1634,13 @@ namespace Conformance
 #include "multiviewfrag.spv"  // IWYU pragma: keep
             SPV_SUFFIX;
 
+        std::vector<uint32_t> envDepthVertexSPIRV = SPV_PREFIX
+#include "envdepthvert.spv"  // IWYU pragma: keep
+            SPV_SUFFIX;
+        std::vector<uint32_t> envDepthFragmentSPIRV = SPV_PREFIX
+#include "envdepthfrag.spv"  // IWYU pragma: keep
+            SPV_SUFFIX;
+
         if (vertexSPIRV.empty())
             XRC_THROW("Failed to compile vertex shader");
         if (fragmentSPIRV.empty())
@@ -1645,11 +1659,15 @@ namespace Conformance
         m_mvShaderProgram.LoadFragmentShader(mvFragmentSPIRV);
         #endif
 
-        m_multiviewShaderProgram
         ALOGE("%s:xxxxxx:3:%d,2:%d", __func__, multiviewVertexSPIRV.size(), multiviewFragmentSPIRV.size());
         m_multiviewShaderProgram.Init(m_vkDevice);
         m_multiviewShaderProgram.LoadVertexShader(multiviewVertexSPIRV);
         m_multiviewShaderProgram.LoadFragmentShader(multiviewFragmentSPIRV);
+
+        ALOGE("%s:xxxxxx:4:%d,2:%d", __func__, multiviewVertexSPIRV.size(), multiviewFragmentSPIRV.size());
+        m_envDepthShaderProgram.Init(m_vkDevice);
+        m_envDepthShaderProgram.LoadVertexShader(envDepthVertexSPIRV);
+        m_envDepthShaderProgram.LoadFragmentShader(envDepthFragmentSPIRV);
 
         m_computeShaderProgram.Init(m_vkDevice);
         m_computeShaderProgram.LoadComputeShader(computeSPIRV);
@@ -1662,9 +1680,15 @@ namespace Conformance
         if (!m_cmdBuffer.Init(m_namer, m_vkDevice, m_queueFamilyIndex))
             XRC_THROW("Failed to create command buffer");
 
-        m_pipelineLayout.Create(m_vkDevice);
+        bool edo_enalble      = GetGlobalData().IsUsingEnvDepthOcclusion();
+
+        m_pipelineLayout.Create(m_vkDevice, SHADER_PROGRAM_TYPE_GRAPHICS, edo_enalble);
         XRC_CHECK_THROW_VKCMD(
             m_namer.SetName(VK_OBJECT_TYPE_PIPELINE_LAYOUT, (uint64_t)m_pipelineLayout.layout, "CTS graphics pipeline layout"));
+        if(edo_enalble){
+            XRC_CHECK_THROW_VKCMD(m_namer.SetName(VK_OBJECT_TYPE_DESCRIPTOR_SET_LAYOUT, (uint64_t)m_pipelineLayout.descriptorSetLayout,
+                                              "CTS graphics env depth descriptor set layout"));
+        }
 
         m_computePipelineLayout.Create(m_vkDevice, SHADER_PROGRAM_TYPE_COMPUTE);
         XRC_CHECK_THROW_VKCMD(
@@ -1680,6 +1704,16 @@ namespace Conformance
         allocInfo.descriptorSetCount = 1;
         allocInfo.pSetLayouts = &m_computePipelineLayout.descriptorSetLayout;
         XRC_CHECK_THROW_VKCMD(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, &m_ComputeDescriptorSet));
+
+        if(edo_enalble){
+            m_gfxDescriptorPool.adopt(CreateDescriptorPool(m_vkDevice, 1, 1), m_vkDevice);
+
+            VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
+            allocInfo.descriptorPool = m_gfxDescriptorPool.get();
+            allocInfo.descriptorSetCount = 1;
+            allocInfo.pSetLayouts = &m_pipelineLayout.descriptorSetLayout;
+            XRC_CHECK_THROW_VKCMD(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, &m_gfxDescriptorSet));
+        }
 
         static_assert(sizeof(Geometry::Vertex) == 24, "Unexpected Vertex size");
 
@@ -1748,12 +1782,14 @@ namespace Conformance
             m_mvShaderProgram.Reset();
         #endif
             m_multiviewShaderProgram.Reset();
+            m_envDepthShaderProgram.Reset();
 
 
             m_computeShaderProgram.Reset();
             m_memAllocator.Reset();
 
             m_computeDescriptorPool.reset();
+            m_gfxDescriptorPool.reset();
 
 #if defined(USE_MIRROR_WINDOW)
             m_swapchain.Reset();
@@ -2104,7 +2140,7 @@ namespace Conformance
         #endif
 
         if(!isMotionVector){
-            if(multiview_enable){
+            if(!multiview_enable){
                 auto typedResult = std::make_unique<VulkanSwapchainImageData>(
                     m_namer, uint32_t(size), colorSwapchainCreateInfo, depthSwapchain, depthSwapchainCreateInfo, m_vkDevice, &m_memAllocator,
                     m_pipelineLayout, m_computePipelineLayout, m_shaderProgram, m_computeShaderProgram, VulkanMesh::c_bindingDesc,
@@ -2116,9 +2152,10 @@ namespace Conformance
                 m_swapchainImageDataMap.Adopt(std::move(typedResult));
                 return ret;
             } else {
+                bool edo_enalble      = GetGlobalData().IsUsingEnvDepthOcclusion();
                 auto typedResult = std::make_unique<VulkanSwapchainImageData>(
                     m_namer, uint32_t(size), colorSwapchainCreateInfo, depthSwapchain, depthSwapchainCreateInfo, m_vkDevice, &m_memAllocator,
-                    m_pipelineLayout, m_computePipelineLayout, m_multiviewShaderProgram, m_computeShaderProgram, VulkanMesh::c_bindingDesc,
+                    m_pipelineLayout, m_computePipelineLayout, edo_enalble?m_envDepthShaderProgram:m_multiviewShaderProgram, m_computeShaderProgram, VulkanMesh::c_bindingDesc,
                     VulkanMesh::c_attrDesc);
 
                 // Cast our derived type to the caller-expected type.
@@ -2428,12 +2465,14 @@ namespace Conformance
 
     void VulkanGraphicsPlugin::RenderView(const XrCompositionLayerProjectionView& layerView,
                                           const XrSwapchainImageBaseHeader* colorSwapchainImage, const RenderParams& params, bool isMotionVectorPass, const XrCompositionLayerProjectionView* prevLayerView, 
-                                          const XrCompositionLayerProjectionView* nextLayerView, const XrCompositionLayerProjectionView* nextPrevLayerView)
+                                          const XrCompositionLayerProjectionView* nextLayerView, const XrCompositionLayerProjectionView* nextPrevLayerView,
+                                         const EnvDepthOcclusionParams* edoParams)
 
     {
         VulkanSwapchainImageData* swapchainData;
         uint32_t imageIndex;
         bool multiview_enable = GetGlobalData().IsUsingMultiview();
+        (nextPrevLayerView);
 
         ALOGE("%s:xxxxxx:%d", __func__, isMotionVectorPass);
         #ifndef FEATURE_ADD_MOTION_VECTOR
@@ -2467,9 +2506,54 @@ namespace Conformance
         vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
         CHECKPOINT();
+        ALOGE("%s:xxxxxx::1", __func__);
 
         swapchainData->BindPipeline(m_cmdBuffer.buf, imageArrayIndex);
 
+        CHECKPOINT();
+
+        bool edo_enalble      = GetGlobalData().IsUsingEnvDepthOcclusion();
+        struct
+        {
+            XrMatrix4x4f vp[2];
+        } ubo;
+
+        uint8_t* uboData = (uint8_t*)&ubo;
+
+        VkBufferCreateInfo bufferCreateInfo{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+        bufferCreateInfo.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+        bufferCreateInfo.size = static_cast<VkDeviceSize>(sizeof(ubo));
+
+        Conformance::BufferAndMemory uboBuffer;
+        uboBuffer.Create(m_vkDevice, m_memAllocator, bufferCreateInfo);
+        XRC_CHECK_THROW_VKCMD(m_namer.SetName(VK_OBJECT_TYPE_BUFFER, (uint64_t)uboBuffer.buf, "CTS ENV depth UBO buffer"));
+        ALOGE("%s:xxxxxx::2", __func__);
+
+        VkImageView depthView{VK_NULL_HANDLE};
+        auto defaultSampler = std::make_shared<Conformance::ScopedVkSampler>(Pbr::VulkanTexture::CreateSampler(m_vkDevice), m_vkDevice);
+        ALOGE("%s:xxxxxx::2.1", __func__);
+        if(edo_enalble){
+            VkImageViewCreateInfo depthViewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+
+            ALOGE("%s:xxxxxx::2.2:%p", __func__, edoParams->depthTex);
+            depthViewInfo.image = (VkImage)edoParams->depthTex;
+            depthViewInfo.viewType = multiview_enable?VK_IMAGE_VIEW_TYPE_2D_ARRAY:VK_IMAGE_VIEW_TYPE_2D;
+            depthViewInfo.format = VK_FORMAT_D16_UNORM;
+            depthViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
+            depthViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
+            depthViewInfo.components.b = VK_COMPONENT_SWIZZLE_B;
+            depthViewInfo.components.a = VK_COMPONENT_SWIZZLE_A;
+            depthViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+            depthViewInfo.subresourceRange.baseMipLevel = 0;
+            depthViewInfo.subresourceRange.levelCount = 1;
+            depthViewInfo.subresourceRange.baseArrayLayer = 0;
+            depthViewInfo.subresourceRange.layerCount = multiview_enable?2:1;
+            XRC_CHECK_THROW_VKCMD(vkCreateImageView(m_vkDevice, &depthViewInfo, nullptr, &depthView));
+            ALOGE("%s:xxxxxx::2.3:%p", __func__, depthView);
+            XRC_CHECK_THROW_VKCMD(m_namer.SetName(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)depthView, "CTS env depth image view"));
+        }
+
+        ALOGE("%s:xxxxxx::3", __func__);
         CHECKPOINT();
 
         if(!isMotionVectorPass){
@@ -2555,18 +2639,18 @@ namespace Conformance
                 XrMatrix4x4f view[size];
                 XrMatrix4x4f vp[size];
 
-                XrMatrix4x4f_CreateProjectionFov(&proj[0], GRAPHICS_OPENGL_ES, layerView.fov, 0.05f, 100.0f);
-                XrMatrix4x4f_CreateTranslationRotationScale(&toView[0], &layerViews.pose.position, &layerViews.pose.orientation, &scale);
+                XrMatrix4x4f_CreateProjectionFov(&proj[0], GRAPHICS_VULKAN, layerView.fov, 0.05f, 100.0f);
+                XrMatrix4x4f_CreateTranslationRotationScale(&toView[0], &layerView.pose.position, &layerView.pose.orientation, &scale);
                 XrMatrix4x4f_InvertRigidBody(&view[0], &toView[0]);
                 XrMatrix4x4f_Multiply(&vp[0], &proj[0], &view[0]);
 
-                XrMatrix4x4f_CreateProjectionFov(&proj[1], GRAPHICS_OPENGL_ES, nextLayerView->ov, 0.05f, 100.0f);
+                XrMatrix4x4f_CreateProjectionFov(&proj[1], GRAPHICS_VULKAN, nextLayerView->fov, 0.05f, 100.0f);
                 XrMatrix4x4f_CreateTranslationRotationScale(&toView[1], &nextLayerView->pose.position, &nextLayerView->pose.orientation, &scale);
                 XrMatrix4x4f_InvertRigidBody(&view[1], &toView[1]);
                 XrMatrix4x4f_Multiply(&vp[1], &proj[1], &view[1]);
                 MeshHandle lastMeshHandle;
 
-                const auto drawMesh = [this, &vp, &lastMeshHandle](const MeshDrawable mesh) {
+                const auto drawMesh = [this, &vp, &lastMeshHandle, &edo_enalble, &edoParams, &ubo, &uboBuffer, &uboData, &depthView, &defaultSampler, &size, &bufferCreateInfo](const MeshDrawable mesh) {
                     VulkanMesh& vkMesh = m_meshes[mesh.handle];
                     if (mesh.handle != lastMeshHandle) {
                         // We are now rendering a new mesh
@@ -2582,6 +2666,47 @@ namespace Conformance
                         CHECKPOINT();
                         lastMeshHandle = mesh.handle;
                     }
+
+                    ALOGE("%s:xxxxxx::4", __func__);
+                    if(edo_enalble)
+                    {
+                        ubo.vp[0] = edoParams->depthViewProj[0];
+                        ubo.vp[1] = edoParams->depthViewProj[1];
+                        uboBuffer.Update<uint8_t>(m_vkDevice, {uboData, static_cast<size_t>(bufferCreateInfo.size)}, 0);
+
+                        VkImageView depthImageView = depthView;
+                        VkImageLayout depthImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                        uint32_t depthImageBinding = 0;
+                        uint32_t uboBinding = 1;
+
+                        VkDescriptorImageInfo depthImageInfo;
+                        depthImageInfo.imageLayout = depthImageLayout;
+                        depthImageInfo.imageView = depthImageView;
+                        depthImageInfo.sampler = defaultSampler->get();
+
+                        VkDescriptorBufferInfo uboInfo;
+                        uboInfo.buffer = uboBuffer.buf;
+                        uboInfo.offset = 0;
+                        uboInfo.range = VK_WHOLE_SIZE;
+
+                        VkWriteDescriptorSet writeDescriptorSets[2]{};
+                        writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        writeDescriptorSets[0].dstSet = m_ComputeDescriptorSet;
+                        writeDescriptorSets[0].dstBinding = depthImageBinding;
+                        writeDescriptorSets[0].descriptorCount = 1;
+                        writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                        writeDescriptorSets[0].pImageInfo = &depthImageInfo;
+
+                        writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                        writeDescriptorSets[1].dstSet = m_ComputeDescriptorSet;
+                        writeDescriptorSets[1].dstBinding = uboBinding;
+                        writeDescriptorSets[1].descriptorCount = 1;
+                        writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                        writeDescriptorSets[1].pBufferInfo = &uboInfo;
+
+                        vkUpdateDescriptorSets(m_vkDevice, (uint32_t)ArraySize(writeDescriptorSets), writeDescriptorSets, 0, NULL);
+                    }
+
 
                     // Compute the model-view-projection transform and push it.
                     XrMatrix4x4f model =
@@ -2614,21 +2739,6 @@ namespace Conformance
                 // Render each mesh
                 for (const auto& mesh : params.meshes) {
                     drawMesh(mesh);
-                }
-
-                // Render each gltf
-                for (const auto& gltfDrawable : params.glTFs) {
-                    VulkanGLTF& gltf = m_gltfInstances[gltfDrawable.handle];
-                    // Compute and update the model transform.
-
-                    XrMatrix4x4f modelToWorld = Matrix::FromTranslationRotationScale(
-                        gltfDrawable.params.pose.position, gltfDrawable.params.pose.orientation, gltfDrawable.params.scale);
-                    // XrMatrix4x4f viewMatrix = Matrix::FromPose(layerView.pose);
-                    // XrMatrix4x4f viewMatrixInverse = Matrix::InvertRigidBody(viewMatrix);
-                    m_pbrResources->SetViewProjection(view, proj);
-
-                    gltf.Render(m_cmdBuffer, *m_pbrResources, modelToWorld, renderPassBeginInfo.renderPass,
-                                (VkSampleCountFlagBits)swapchainData->GetCreateInfo().sampleCount);
                 }
             }
         } else {
@@ -2712,6 +2822,11 @@ namespace Conformance
         m_cmdBuffer.Wait();
 
         m_pbrResources->Wait();
+
+        uboBuffer.Reset(m_vkDevice);
+        if(depthView != VK_NULL_HANDLE){
+            vkDestroyImageView(m_vkDevice, depthView, nullptr);
+        }
 
 #if defined(USE_MIRROR_WINDOW)
         // Cycle the window's swapchain on the last view rendered

@@ -485,12 +485,17 @@ namespace Conformance
 
     bool GlobalData::IsGraphicsPluginVulkan()
     {
-        return Options::Get().graphicsPlugin.c_str() == "vulkan";
+        return Options::Get().graphicsPlugin == "vulkan";
     }
 
-    bool GlobalData::IsUsingMultiView() const
+    bool GlobalData::IsUsingMultiview() const
     {
         return isUsingMultiView;
+    }
+
+    bool GlobalData::IsUsingEnvDepthOcclusion() const
+    {
+        return isUsingEnvDepthOcclusion;
     }
 
     void GlobalData::PushSwapchainFormat(int64_t format, const std::string& name)

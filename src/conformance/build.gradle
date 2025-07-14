@@ -94,6 +94,8 @@ android {
             path "${project.repoRoot}/CMakeLists.txt"
         }
     }
+
+    packagingOptions.doNotStrip "*/arm64-v8a/*.so"
 }
 
 // Fix error about undeclared deps when building as release with

@@ -27,6 +27,8 @@
 
 #include <catch2/catch_test_macros.hpp>
 #include <openxr/openxr.h>
+#include <jni.h>
+#include <openxr/openxr_platform.h>
 
 #include <algorithm>
 #include <array>
@@ -280,7 +282,7 @@ namespace Conformance
 
         std::vector<XrSwapchainCreateInfo> colorSwapchainCreateInfo;
         std::vector<XrSwapchainCreateInfo> depthSwapchainCreateInfo;
-        bool isUsingMultiView = globalData.IsUsingMultiView();
+        bool isUsingMultiView = globalData.IsUsingMultiview();
 
         if(!isUsingMultiView){
             for (auto& view : viewProperties) {
@@ -342,7 +344,7 @@ namespace Conformance
 
         XrSystemEnvironmentDepthPropertiesMETA env_depth_properties_{};
 
-        std::shared_ptr<EnvironmentDepthMeta> env_depth_context_;
+        std::shared_ptr<EnvironmentDepthMeta> env_depth_context_ = std::make_shared<EnvironmentDepthMeta>(compositionHelper);
         std::vector<uint64_t> env_depth_gl_textures_;
         std::vector<uint64_t> env_depth_vulkan_textures_;
 
@@ -352,6 +354,8 @@ namespace Conformance
         //enum images
         uint32_t imageCapacity = 0;
         env_depth_context_->EnumerateEnvironmentDepthSwapchainImages(imageCapacity, &imageCapacity, nullptr);
+
+        ALOGE("%s:xxxxxx:imageCapacity :%d", __func__, imageCapacity );
 
         if(!isVulkan){
             std::vector<XrSwapchainImageOpenGLESKHR> images_gles(imageCapacity);
@@ -376,6 +380,7 @@ namespace Conformance
             env_depth_vulkan_textures_.resize(imageCapacity);
             for (uint32_t i = 0; i < imageCapacity; ++i) {
                 env_depth_vulkan_textures_[i] = uint64_t(images_gles[i].image);
+                ALOGE("%s:xxxxxx:vulkan_textures:%p", __func__, env_depth_vulkan_textures_[i] );
             }
         }
 
@@ -404,10 +409,12 @@ namespace Conformance
                         compositionHelper.CreateSwapchainWithDepth(colorSwapchainCreateInfo[0], depthSwapchainCreateInfo[0]));
                 const_cast<XrSwapchainSubImage&>(projLayers[layer]->views[0].subImage) =
                         compositionHelper.MakeDefaultSubImage(swapchain[layer][0].first);
+                const_cast<XrSwapchainSubImage&>(projLayers[layer]->views[1].subImage) =
+                        compositionHelper.MakeDefaultSubImage(swapchain[layer][0].first);
             }
         }
 
-        ALOGE("xxxxxx:ProjectionDepthWithVST:without depthtest");
+        ALOGE("xxxxxx:Env Depth Cases:");
 
         XrCompositionLayerPassthroughFB passthrough_layer = {
                 XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB};
@@ -429,6 +436,7 @@ namespace Conformance
             XrEnvironmentDepthImageAcquireInfoMETA envDepthAcquireInfo{
                     XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_ACQUIRE_INFO_META};
 
+            env_depth_acq_result_.predictedDisplayTime = frameState.predictedDisplayTime;
             envDepthAcquireInfo.space = localSpace;
             envDepthAcquireInfo.displayTime = env_depth_acq_result_.predictedDisplayTime;
             XrEnvironmentDepthImageMETA envDepthImage{XR_TYPE_ENVIRONMENT_DEPTH_IMAGE_META};
@@ -447,7 +455,7 @@ namespace Conformance
                 env_depth_acq_result_.pose[1] = envDepthImage.views[1].pose;
                 env_depth_acq_result_.fov[0] = envDepthImage.views[0].fov;
                 env_depth_acq_result_.fov[1] = envDepthImage.views[1].fov;
-                ALOGE("%s:index:%d, texture:%d", __FUNCTION__, envDepthImage.swapchainIndex, env_depth_acq_result_.texture);
+                ALOGE("%s:index:%d, texture:%d, isVulkan:%d", __FUNCTION__, envDepthImage.swapchainIndex, env_depth_acq_result_.texture, isVulkan);
             }
 
             const int size = 2;
@@ -477,6 +485,8 @@ namespace Conformance
                     XrMatrix4x4f_Multiply(&depthUV2World[i], &depthViewProjInv[i], &UVD2NDCMAT);
                 }
                 depthTex = env_depth_acq_result_.texture;
+            } else {
+                ALOGE("depth buffer not valid");
             }
 
             std::vector<XrCompositionLayerBaseHeader*> layers;
@@ -500,6 +510,7 @@ namespace Conformance
                                 });
                         }
                     } else {
+                        EnvDepthOcclusionParams edoParams(depthViewProj[0], depthViewProj[1], depthTex);
                         compositionHelper.AcquireWaitReleaseImage(
                             swapchain[layer][0].first, [&](const XrSwapchainImageBaseHeader* swapchainImage) {
                                 GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage, 0, {0.0f, 0.0f, 0.0f, 0.0f});
@@ -507,10 +518,12 @@ namespace Conformance
                                 for (size_t j = 0; j < views.size(); j++) {
                                     const_cast<XrFovf&>(projLayers[layer]->views[j].fov) = views[j].fov;
                                     const_cast<XrPosef&>(projLayers[layer]->views[j].pose) = views[j].pose;
-                                    projLayers[layer]->views[j].subImage.imageArrayIndex = j;
+                                    const_cast<uint32_t&>(projLayers[layer]->views[j].subImage.imageArrayIndex) = j;
                                 }
                                 GetGlobalData().graphicsPlugin->RenderView(projLayers[layer]->views[0], swapchainImage,
-                                                                        RenderParams().Draw(cubes[layer]), false, nullptr, &projLayers[layer]->views[1], nullptr);
+                                                                        RenderParams().Draw(cubes[layer]), false, nullptr, 
+                                                                        &projLayers[layer]->views[1], nullptr,
+                                                                        &edoParams);
                             });
                     }
                     layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(projLayers[layer]));

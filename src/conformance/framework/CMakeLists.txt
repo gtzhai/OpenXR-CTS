@@ -46,6 +46,10 @@ set(VULKAN_SHADERS "${CMAKE_CURRENT_SOURCE_DIR}/vulkan_shaders/frag.glsl"
                    "${CMAKE_CURRENT_SOURCE_DIR}/vulkan_shaders/comp.glsl"
 				   "${CMAKE_CURRENT_SOURCE_DIR}/vulkan_shaders/mvfrag.glsl"
 				   "${CMAKE_CURRENT_SOURCE_DIR}/vulkan_shaders/mvvert.glsl"
+                   "${CMAKE_CURRENT_SOURCE_DIR}/vulkan_shaders/multiviewvert.glsl"
+                   "${CMAKE_CURRENT_SOURCE_DIR}/vulkan_shaders/multiviewfrag.glsl"
+                   "${CMAKE_CURRENT_SOURCE_DIR}/vulkan_shaders/envdepthvert.glsl"
+                   "${CMAKE_CURRENT_SOURCE_DIR}/vulkan_shaders/envdepthfrag.glsl"
 )
 
 run_xr_xml_generate(

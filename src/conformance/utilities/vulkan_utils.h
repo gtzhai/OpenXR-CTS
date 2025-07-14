@@ -5,6 +5,7 @@
 #pragma once
 
 #include "utilities/array_size.h"
+
 #ifdef XR_USE_GRAPHICS_API_VULKAN
 
 #include "throw_helpers.h"
@@ -824,7 +825,7 @@ namespace Conformance
         RenderPass() = default;
 
         bool Create(const VulkanDebugObjectNamer& namer, VkDevice device, VkFormat aColorFmt, VkFormat aDepthFmt,
-                    VkSampleCountFlagBits aSampleCount, bool msaa_enable)
+                    VkSampleCountFlagBits aSampleCount, bool msaa_enable, bool multiview_enable)
         {
             bool usingRP2 = false;
 
@@ -878,7 +879,6 @@ namespace Conformance
                 subpass.pDepthStencilAttachment = &depthRef;
             }
 
-            bool multiview_enable = GetGlobalData().IsUsingMultiview();
             const uint32_t viewMask = 0b00000011;
             const uint32_t correlationMask = 0b00000011;
             VkRenderPassMultiviewCreateInfo renderPassMultiviewCI = {
@@ -1142,7 +1142,8 @@ namespace Conformance
             return *this;
         }
         void Create(const VulkanDebugObjectNamer& namer, VkDevice device, VkImage aColorImage, VkImage aDepthOrStencilImage,
-                    VkImageAspectFlags depthOrStencilImageAspect, uint32_t baseArrayLayer, VkExtent2D size, RenderPass& renderPass, VkImage aColorImageMSAA, VkImage aDepthOrStencilImageMSAA, bool msaa_enable)
+                    VkImageAspectFlags depthOrStencilImageAspect, uint32_t baseArrayLayer, VkExtent2D size, RenderPass& renderPass, VkImage aColorImageMSAA, VkImage aDepthOrStencilImageMSAA,
+                    bool msaa_enable, bool multiview_enable)
         {
             m_vkDevice = device;
 
@@ -1164,7 +1165,6 @@ namespace Conformance
 
             std::array<VkImageView, 4> attachments{};
             uint32_t attachmentCount = 0;
-            bool multiview_enable = GetGlobalData().IsUsingMultiview();
 
             // Create color image view
             if (colorImage != VK_NULL_HANDLE) {
@@ -1342,7 +1342,7 @@ namespace Conformance
             Reset();
         }
 
-        void Create(VkDevice device, ShaderProgramType programType = SHADER_PROGRAM_TYPE_GRAPHICS)
+        void Create(VkDevice device, ShaderProgramType programType = SHADER_PROGRAM_TYPE_GRAPHICS, bool edo_enalble = false)
         {
             m_vkDevice = device;
             switch (programType) {
@@ -1356,6 +1356,30 @@ namespace Conformance
                 VkPipelineLayoutCreateInfo pipelineLayoutCreateInfo{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
                 pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
                 pipelineLayoutCreateInfo.pPushConstantRanges = &pcr;
+
+                if(edo_enalble){
+                    VkDescriptorSetLayoutBinding descriptorSetBindings[2]{};
+                    descriptorSetBindings[0].binding = 0;
+                    descriptorSetBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                    descriptorSetBindings[0].descriptorCount = 1;
+                    descriptorSetBindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+                    descriptorSetBindings[1].binding = 1;
+                    descriptorSetBindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                    descriptorSetBindings[1].descriptorCount = 1;
+                    descriptorSetBindings[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+                    VkDescriptorSetLayoutCreateInfo descriptorSetLayoutInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+                    descriptorSetLayoutInfo.bindingCount = (uint32_t)ArraySize(descriptorSetBindings);
+                    descriptorSetLayoutInfo.pBindings = descriptorSetBindings;
+
+                    vkCreateDescriptorSetLayout(device,  //
+                                                &descriptorSetLayoutInfo, NULL, &descriptorSetLayout);
+
+                    pipelineLayoutCreateInfo.setLayoutCount = 1;
+                    pipelineLayoutCreateInfo.pSetLayouts = &descriptorSetLayout;
+                }
+
                 XRC_CHECK_THROW_VKCMD(vkCreatePipelineLayout(m_vkDevice, &pipelineLayoutCreateInfo, nullptr, &layout));
             } break;
             case SHADER_PROGRAM_TYPE_COMPUTE: {
@@ -1621,13 +1645,12 @@ namespace Conformance
                       uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount)
         {
             Reset();
-            bool multiview_enable = GetGlobalData().IsUsingMultiview();
 
             m_vkDevice = device;
 
             // Create a D32 depthbuffer
             VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-            imageInfo.imageType = multiview_enable?VK_IMAGE_TYPE_2D_ARRAY:VK_IMAGE_TYPE_2D;
+            imageInfo.imageType = VK_IMAGE_TYPE_2D;
             imageInfo.extent.width = width;
             imageInfo.extent.height = height;
             imageInfo.extent.depth = 1;
@@ -1746,13 +1769,12 @@ namespace Conformance
                       uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount)
         {
             Reset();
-            bool multiview_enable = GetGlobalData().IsUsingMultiview();
 
             m_vkDevice = device;
 
             // Create a D32 colorbuffer
             VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
-            imageInfo.imageType = multiview_enable?VK_IMAGE_TYPE_2D_ARRAY:VK_IMAGE_TYPE_2D;
+            imageInfo.imageType = VK_IMAGE_TYPE_2D;
             imageInfo.extent.width = width;
             imageInfo.extent.height = height;
             imageInfo.extent.depth = 1;

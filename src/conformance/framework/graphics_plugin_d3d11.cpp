@@ -215,7 +215,8 @@ namespace Conformance
 
         void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* colorSwapchainImage,
                         const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr, 
-                        const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr) override;
+                        const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr,
+                         const EnvDepthOcclusionParams* edoParams = nullptr) override;
 
 
         void RenderClearImageSliceCompute(const XrCompositionLayerProjectionView& layerView,
@@ -754,7 +755,8 @@ namespace Conformance
 
     void D3D11GraphicsPlugin::RenderView(const XrCompositionLayerProjectionView& layerView,
                                          const XrSwapchainImageBaseHeader* colorSwapchainImage, const RenderParams& params, bool isMotionVectorPass, const XrCompositionLayerProjectionView* prevLayerView,
-                                        const XrCompositionLayerProjectionView* nextLayerView, const XrCompositionLayerProjectionView* nextPrevLayerView)
+                                        const XrCompositionLayerProjectionView* nextLayerView, const XrCompositionLayerProjectionView* nextPrevLayerView
+                                     const EnvDepthOcclusionParams* edoParams)
 
     {
         D3D11SwapchainImageData* swapchainData;

@@ -95,6 +95,18 @@ namespace Conformance
     /// Color constant used as the default clear color.
     constexpr XrColor4f DarkSlateGrey = {0.184313729f, 0.309803933f, 0.309803933f, 1.0f};
 
+    struct EnvDepthOcclusionParams{
+        XrMatrix4x4f depthViewProj[2]={{},{}};
+        uint64_t depthTex = 0;
+
+        EnvDepthOcclusionParams(XrMatrix4x4f left_, XrMatrix4x4f right_, uint64_t tex_) 
+        {
+            depthViewProj[0] = (left_),
+            depthViewProj[1] = (right_),
+            depthTex = tex_;
+        }
+    };
+
     /// Parameters for a particular copy of a drawable.
     struct DrawableParams
     {
@@ -412,7 +424,8 @@ namespace Conformance
         /// Render a list of drawables to a swapchain image. ClearImageSlice must be called first to clear internal state.
         virtual void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* colorSwapchainImage,
                                 const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr, 
-                                const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr) = 0;
+                                const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr,
+                                const EnvDepthOcclusionParams* edoParams = nullptr) = 0;
 
 
         /// Clears a slice to an arbitrary color with a compute shader. Can only be used with XR_SWAPCHAIN_USAGE_UNORDERED_ACCESS_BIT.

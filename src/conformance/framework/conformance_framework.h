@@ -322,7 +322,8 @@ namespace Conformance
         void PopulateMinVersionAndEnabledExtensions(FeatureSet& out) const;
 
         bool IsUsingMSAA() const;
-        bool IsUsingMultiView() const;
+        bool IsUsingMultiview() const;
+        bool IsUsingEnvDepthOcclusion() const;
         bool IsGraphicsPluginVulkan();
     public:
         /// Guards all member data.
@@ -394,7 +395,8 @@ namespace Conformance
         XrBaseInStructure* requiredPlatformInstanceCreateStruct{};
 
         bool isUsingMSAA{false};
-        bool isUsingMultiView{false};
+        bool isUsingMultiView{true};
+        bool isUsingEnvDepthOcclusion{true};
 
     private:
         VersionDependentDataArray versionDependentData;

@@ -54,12 +54,12 @@
     {                                                                                     \
         GLint err = glGetError();                                                         \
         if (err != GL_NO_ERROR) {                                                         \
-            ReportF("GLES error=%d, %s:%d", err, __FUNCTION__, __LINE__);                 \
+            ALOGE("GLES error=%d, %s:%d", err, __FUNCTION__, __LINE__);                 \
         }                                                                                 \
         glcmd;                                                                            \
         err = glGetError();                                                               \
         if (err != GL_NO_ERROR) {                                                         \
-            ReportF("GLES error=%d, cmd=%s, %s:%d", err, #glcmd, __FUNCTION__, __LINE__); \
+            ALOGE("GLES error=%d, cmd=%s, %s:%d", err, #glcmd, __FUNCTION__, __LINE__); \
         }                                                                                 \
     }
 
@@ -151,6 +151,76 @@ namespace Conformance
     {
      highp vec4 motionVector = ( clipPos / clipPos.w - prevClipPos / prevClipPos.w ); 
      outColor = motionVector;
+    }
+    )_";
+
+    static const char* OCCLUSION_VERTEX_SHADER = R"_(#version 320 es
+    #define NUM_VIEWS 2
+    #define VIEW_ID gl_ViewID_OVR
+    #extension GL_OVR_multiview2 : require
+    layout(num_views=NUM_VIEWS) in;
+
+    in vec3 vertexPos;
+    in vec3 vertexColor;
+
+    uniform mat4 ModelMatrix;
+    uniform mat4 ViewProjectionMatrix[NUM_VIEWS];
+    uniform vec4 tintColor;
+
+    out vec4 PSVertexColor;
+    out vec4 cubeWorldPosition;
+    void main() {
+        cubeWorldPosition = ModelMatrix * vec4(vertexPos, 1.0f);
+        gl_Position = ViewProjectionMatrix[VIEW_ID] * cubeWorldPosition;
+        PSVertexColor = vec4(mix(vertexColor, tintColor.rgb, tintColor.a), 1.0f);
+    }
+    )_";
+
+    static const char* OCCLUSION_FRAGMENT_SHADER = R"_(#version 320 es
+    #define NUM_VIEWS 2
+    #define VIEW_ID gl_ViewID_OVR
+    #extension GL_OVR_multiview2 : require
+
+    in lowp vec4 PSVertexColor;
+    in lowp vec4 cubeWorldPosition;
+
+    uniform highp float alpha;
+
+    uniform highp mat4 DepthViewProjectionMatrix[NUM_VIEWS];
+
+    uniform highp sampler2DArray EnvironmentDepthTexture;
+    out lowp vec4 outColor;
+
+    void main() {
+      // Transform from world space to depth camera space using 6-DOF matrix
+      highp vec4 cubeDepthCameraPosition = DepthViewProjectionMatrix[VIEW_ID] * cubeWorldPosition;
+  
+      // 3D point --> Homogeneous Coordinates --> Normalized Coordinates in [0,1]
+      highp vec2 cubeDepthCameraPositionHC = cubeDepthCameraPosition.xy / cubeDepthCameraPosition.w;
+      cubeDepthCameraPositionHC = cubeDepthCameraPositionHC * 0.5f + 0.5f;
+  
+      // Sample from Environment Depth API texture
+      highp vec3 depthViewCoord = vec3(cubeDepthCameraPositionHC, VIEW_ID);
+      highp float depthViewEyeZ = texture(EnvironmentDepthTexture, depthViewCoord).r;
+  
+      // Get virtual object depth
+      highp float cubeDepth = cubeDepthCameraPosition.z / cubeDepthCameraPosition.w;
+      cubeDepth = cubeDepth * 0.5f + 0.5f;
+  
+      // Test virtual object depth with environment depth.
+      // If the virtual object is further away (occluded) output a transparent color so real scene content from PT layer is displayed.
+      outColor = PSVertexColor;
+      if (cubeDepth < depthViewEyeZ) {
+        outColor.a = 1.0f; // fully opaque
+      }
+      else {
+        outColor = vec4(0.0f, 0.0f, 0.0f, 0.0f); // invisible
+      }
+      outColor = vec4(depthViewEyeZ, depthViewEyeZ, depthViewEyeZ, 0.0f); // invisible
+      outColor = vec4(0.0f, 1.0f, 1.0f, 1.0f); // invisible
+  
+      //gl_FragDepth = cubeDepth;
+      //gl_FragDepth = 0.0f;
     }
     )_";
 
@@ -368,7 +438,8 @@ namespace Conformance
 
         void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* colorSwapchainImage,
                         const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr, 
-                        const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr) override;
+                        const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr,
+                     const EnvDepthOcclusionParams* edoParams = nullptr) override;
 
         void RenderClearImageSliceCompute(const XrCompositionLayerProjectionView& layerView,
                                           const XrSwapchainImageBaseHeader* colorSwapchainImage, XrColor4f color) override;
@@ -398,6 +469,12 @@ namespace Conformance
         GLint m_modelViewProjectionUniformLocation{0};
         GLint m_tintColorUniformLocation{0};
         GLint m_alphaUniformLocation{0};
+
+        GLint m_modelUniformLocation{0};
+        GLint m_viewProjectionUniformLocation{0};
+        GLint m_depthViewProjectionUniformLocation{0};
+        GLint m_depthTextureUniformLocation{0};
+
         GLint m_vertexAttribCoords{0};
         GLint m_vertexAttribColor{0};
         MeshHandle m_cubeMesh{};
@@ -571,6 +648,7 @@ namespace Conformance
             ShutdownResources();
             return false;
         }
+        ALOGE("%s:major=%d, minor=%d", __func__, major, minor);
 
         OpenGLESVersionOfContext = XR_MAKE_VERSION(major, minor, 0);
         if (OpenGLESVersionOfContext < graphicsRequirements.minApiVersionSupported) {
@@ -584,6 +662,7 @@ namespace Conformance
         InitializeResources();
 
         deviceInitialized = true;
+        ALOGE("%s:out", __func__);
         return true;
     }
 
@@ -624,29 +703,44 @@ namespace Conformance
 
     void OpenGLESGraphicsPlugin::InitializeResources()
     {
+        ALOGE("%s:in", __func__);
         bool multiview_enable = GetGlobalData().IsUsingMultiview();
+        bool edo_enalble      = GetGlobalData().IsUsingEnvDepthOcclusion();
         //ReportF("OpenGLESGraphicsPlugin::InitializeResources");
         GL(glGenFramebuffers(1, &m_swapchainFramebuffer));
 
         GLuint vertexShader = glCreateShader(GL_VERTEX_SHADER);
         if(multiview_enable){
-            GL(glShaderSource(vertexShader, 1, &VertexShaderGlslMultiview, nullptr));
+            if(edo_enalble){
+                GL(glShaderSource(vertexShader, 1, &OCCLUSION_VERTEX_SHADER, nullptr));
+            } else {
+                GL(glShaderSource(vertexShader, 1, &VertexShaderGlslMultiview, nullptr));
+            }
         } else {
             GL(glShaderSource(vertexShader, 1, &VertexShaderGlsl, nullptr));
         }
 
+        ALOGE("%s:1", __func__);
         GL(glCompileShader(vertexShader));
         CheckShader(vertexShader);
 
+        ALOGE("%s:2", __func__);
         GLuint fragmentShader = glCreateShader(GL_FRAGMENT_SHADER);
         if(multiview_enable){
-            GL(glShaderSource(fragmentShader, 1, &FragmentShaderGlslMultiview, nullptr));
+            if(edo_enalble){
+                GL(glShaderSource(fragmentShader, 1, &OCCLUSION_FRAGMENT_SHADER, nullptr));
+            } else {
+                GL(glShaderSource(fragmentShader, 1, &FragmentShaderGlslMultiview, nullptr));
+            }
         } else {
             GL(glShaderSource(fragmentShader, 1, &FragmentShaderGlsl, nullptr));
         }
+        ALOGE("%s:2.1", __func__);
         GL(glCompileShader(fragmentShader));
+        ALOGE("%s:2.2", __func__);
         CheckShader(fragmentShader);
 
+        ALOGE("%s:3", __func__);
         m_program = glCreateProgram();
         GL(glAttachShader(m_program, vertexShader));
         GL(glAttachShader(m_program, fragmentShader));
@@ -656,9 +750,22 @@ namespace Conformance
         GL(glDeleteShader(vertexShader));
         GL(glDeleteShader(fragmentShader));
 
-        m_modelViewProjectionUniformLocation = glGetUniformLocation(m_program, "ModelViewProjection");
+        if(multiview_enable){
+            m_modelViewProjectionUniformLocation = (glGetUniformLocation(m_program, "ModelViewProjection[0]"));
+        } else {
+            m_modelViewProjectionUniformLocation = glGetUniformLocation(m_program, "ModelViewProjection");
+        }
         m_tintColorUniformLocation = glGetUniformLocation(m_program, "tintColor");
         m_alphaUniformLocation = glGetUniformLocation(m_program, "alpha");
+
+        ALOGE("%s:4", __func__);
+
+        if(edo_enalble){
+            m_modelUniformLocation = (glGetUniformLocation(m_program, "ModelMatrix"));
+            m_viewProjectionUniformLocation = (glGetUniformLocation(m_program, "ViewProjectionMatrix[0]"));
+            m_depthViewProjectionUniformLocation = (glGetUniformLocation(m_program, "DepthViewProjectionMatrix[0]"));
+            m_depthTextureUniformLocation = (glGetUniformLocation(m_program, "EnvironmentDepthTexture"));
+        }
 
         m_vertexAttribCoords = glGetAttribLocation(m_program, "VertexPos");
         m_vertexAttribColor = glGetAttribLocation(m_program, "VertexColor");
@@ -692,17 +799,20 @@ namespace Conformance
 
         m_cubeMesh = MakeCubeMesh();
 
-        m_pbrResources = std::make_unique<Pbr::GLResources>();
-        m_pbrResources->SetLight({0.0f, 0.7071067811865475f, 0.7071067811865475f}, Pbr::RGB::White);
+        if(!edo_enalble){
+            m_pbrResources = std::make_unique<Pbr::GLResources>();
+            m_pbrResources->SetLight({0.0f, 0.7071067811865475f, 0.7071067811865475f}, Pbr::RGB::White);
 
-        auto blackCubeMap = std::make_shared<Pbr::ScopedGLTexture>(Pbr::GLTexture::CreateFlatCubeTexture(Pbr::RGBA::Black, false));
-        m_pbrResources->SetEnvironmentMap(blackCubeMap, blackCubeMap);
+            auto blackCubeMap = std::make_shared<Pbr::ScopedGLTexture>(Pbr::GLTexture::CreateFlatCubeTexture(Pbr::RGBA::Black, false));
+            m_pbrResources->SetEnvironmentMap(blackCubeMap, blackCubeMap);
 
-        // Read the BRDF Lookup Table used by the PBR system into a GL texture.
-        std::vector<unsigned char> brdfLutFileData = ReadFileBytes("brdf_lut.png");
-        auto brdLutResourceView = std::make_shared<Pbr::ScopedGLTexture>(
-            Pbr::GLTexture::LoadTextureImage(*m_pbrResources, false, brdfLutFileData.data(), (uint32_t)brdfLutFileData.size()));
-        m_pbrResources->SetBrdfLut(brdLutResourceView);
+            // Read the BRDF Lookup Table used by the PBR system into a GL texture.
+            std::vector<unsigned char> brdfLutFileData = ReadFileBytes("brdf_lut.png");
+            auto brdLutResourceView = std::make_shared<Pbr::ScopedGLTexture>(
+                Pbr::GLTexture::LoadTextureImage(*m_pbrResources, false, brdfLutFileData.data(), (uint32_t)brdfLutFileData.size()));
+            m_pbrResources->SetBrdfLut(brdLutResourceView);
+        }
+        ALOGE("%s:out", __func__);
     }
 
     void OpenGLESGraphicsPlugin::ShutdownResources()
@@ -1305,6 +1415,7 @@ namespace Conformance
     void OpenGLESGraphicsPlugin::ClearImageSlice(const XrSwapchainImageBaseHeader* colorSwapchainImage, uint32_t imageArrayIndex,
                                                  XrColor4f color)
     {
+        bool multiview_enable = GetGlobalData().IsUsingMultiview();
         OpenGLESSwapchainImageData* swapchainData;
         uint32_t imageIndex;
         bool msaa_enable = GetGlobalData().IsUsingMSAA();
@@ -1318,22 +1429,32 @@ namespace Conformance
 
         const uint32_t colorTexture = swapchainData->GetTypedImage(imageIndex).image;
         const uint32_t depthTexture = swapchainData->GetDepthImageForColorIndex(imageIndex).image;
-        if (isArray) {
+        if(multiview_enable){
             if(msaa_enable){
-                throw std::runtime_error("NOT support msaa when using seprated layer of an 2d array texture");
-            }
-            //glFramebufferTextureMultisampleMultiviewOVR
-            //glFramebufferTextureMultiviewOVR
-            GL(glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, colorTexture, 0, imageArrayIndex));
-            GL(glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthTexture, 0, imageArrayIndex));
-        }
-        else {
-            if(msaa_enable){
-                glFramebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, colorTexture, 0, 4);
-                glFramebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depthTexture, 0, 4);
+                GL(glFramebufferTextureMultisampleMultiviewOVR(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                                               colorTexture, 0, 4, 0, 2));
+                GL(glFramebufferTextureMultisampleMultiviewOVR(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT,
+                                                               depthTexture, 0, 4, 0, 2));
             } else {
-                GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, colorTexture, 0));
-                GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depthTexture, 0));
+                GL(glFramebufferTextureMultiviewOVR(GL_DRAW_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, colorTexture, 0, 0, 2));
+                GL(glFramebufferTextureMultiviewOVR(GL_DRAW_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthTexture, 0, 0, 2));
+            }
+        } else {
+            if (isArray) {
+                if(msaa_enable){
+                    throw std::runtime_error("NOT support msaa when using seprated layer of an 2d array texture");
+                }
+                GL(glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, colorTexture, 0, imageArrayIndex));
+                GL(glFramebufferTextureLayer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthTexture, 0, imageArrayIndex));
+            }
+            else {
+                if(msaa_enable){
+                    glFramebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, colorTexture, 0, 4);
+                    glFramebufferTexture2DMultisampleEXT(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depthTexture, 0, 4);
+                } else {
+                    GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, target, colorTexture, 0));
+                    GL(glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, target, depthTexture, 0));
+                }
             }
         }
 
@@ -1387,13 +1508,15 @@ namespace Conformance
 
     void OpenGLESGraphicsPlugin::RenderView(const XrCompositionLayerProjectionView& layerView,
                                             const XrSwapchainImageBaseHeader* colorSwapchainImage, const RenderParams& params, bool isMotionVectorPass, const XrCompositionLayerProjectionView* prevLayerView, 
-                                            const XrCompositionLayerProjectionView* nextLayerView, const XrCompositionLayerProjectionView* nextPrevLayerView)
+                                            const XrCompositionLayerProjectionView* nextLayerView, const XrCompositionLayerProjectionView* nextPrevLayerView,
+                                         const EnvDepthOcclusionParams* edoParams)
 
     {
         OpenGLESSwapchainImageData* swapchainData;
         uint32_t imageIndex;
         bool msaa_enable = GetGlobalData().IsUsingMSAA();
         bool multiview_enable = GetGlobalData().IsUsingMultiview();
+        (nextPrevLayerView);
 
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(colorSwapchainImage);
 
@@ -1415,10 +1538,14 @@ namespace Conformance
         GL(glScissor(x, y, w, h));
 
         GL(glEnable(GL_SCISSOR_TEST));
-        GL(glEnable(GL_DEPTH_TEST));
-        GL(glEnable(GL_CULL_FACE));
+        GL(glDisable(GL_DEPTH_TEST));
+        GL(glDisable(GL_CULL_FACE));
         GL(glFrontFace(GL_CW));
         GL(glCullFace(GL_BACK));
+
+        GL(glDepthMask(GL_TRUE));
+        GL(glDepthFunc(GL_LEQUAL));
+        GL(glDisable(GL_BLEND));
 
         if(multiview_enable){
             if(msaa_enable){
@@ -1455,6 +1582,7 @@ namespace Conformance
         GL(glUseProgram(m_program));
 
         if(multiview_enable){
+            MeshHandle lastMeshHandle;
             int size = 2;
             XrVector3f scale{1.f, 1.f, 1.f};
             XrMatrix4x4f proj[size];
@@ -1463,16 +1591,17 @@ namespace Conformance
             XrMatrix4x4f vp[size];
 
             XrMatrix4x4f_CreateProjectionFov(&proj[0], GRAPHICS_OPENGL_ES, layerView.fov, 0.05f, 100.0f);
-            XrMatrix4x4f_CreateTranslationRotationScale(&toView[0], &layerViews.pose.position, &layerViews.pose.orientation, &scale);
+            XrMatrix4x4f_CreateTranslationRotationScale(&toView[0], &layerView.pose.position, &layerView.pose.orientation, &scale);
             XrMatrix4x4f_InvertRigidBody(&view[0], &toView[0]);
             XrMatrix4x4f_Multiply(&vp[0], &proj[0], &view[0]);
 
-            XrMatrix4x4f_CreateProjectionFov(&proj[1], GRAPHICS_OPENGL_ES, nextLayerView->ov, 0.05f, 100.0f);
+            XrMatrix4x4f_CreateProjectionFov(&proj[1], GRAPHICS_OPENGL_ES, nextLayerView->fov, 0.05f, 100.0f);
             XrMatrix4x4f_CreateTranslationRotationScale(&toView[1], &nextLayerView->pose.position, &nextLayerView->pose.orientation, &scale);
             XrMatrix4x4f_InvertRigidBody(&view[1], &toView[1]);
             XrMatrix4x4f_Multiply(&vp[1], &proj[1], &view[1]);
 
-            const auto drawMesh = [this, &vp, &lastMeshHandle](const MeshDrawable mesh) {
+            
+            const auto drawMesh = [this, &vp, &size, &lastMeshHandle, &edoParams](const MeshDrawable mesh) {
                 OpenGLESMesh& glMesh = m_meshes[mesh.handle];
                 if (mesh.handle != lastMeshHandle) {
                     // We are now rendering a new mesh
@@ -1483,13 +1612,36 @@ namespace Conformance
                     lastMeshHandle = mesh.handle;
                 }
 
+                bool edo_enalble      = GetGlobalData().IsUsingEnvDepthOcclusion();
+
                 // Compute the model-view-projection transform and set it..
                 XrMatrix4x4f model =
                     Matrix::FromTranslationRotationScale(mesh.params.pose.position, mesh.params.pose.orientation, mesh.params.scale);
-                XrMatrix4x4f mvp[size];
-                mvp[0] = vp[0] * model;
-                mvp[1] = vp[1] * model;
-                GL(glUniformMatrix4fv(m_modelViewProjectionUniformLocation, size, GL_FALSE, reinterpret_cast<const GLfloat*>(mvp)));
+                if(!edo_enalble){
+                    XrMatrix4x4f mvp[size];
+                    mvp[0] = vp[0] * model;
+                    mvp[1] = vp[1] * model;
+                    GL(glUniformMatrix4fv(m_modelViewProjectionUniformLocation, size, GL_FALSE, reinterpret_cast<const GLfloat*>(mvp)));
+                } else {
+                    auto printMat = [](const char* tag,const XrMatrix4x4f& mat){
+                        ALOGE("%s %f,%f,%f,%f\n %f,%f,%f,%f\n %f,%f,%f,%f\n %f,%f,%f,%f\n",tag,
+                              mat.m[0*4+0],mat.m[0*4+1],mat.m[0*4+2],mat.m[0*4+3],
+                              mat.m[1*4+0],mat.m[1*4+1],mat.m[1*4+2],mat.m[1*4+3],
+                              mat.m[2*4+0],mat.m[2*4+1],mat.m[2*4+2],mat.m[2*4+3],
+                              mat.m[3*4+0],mat.m[3*4+1],mat.m[3*4+2],mat.m[3*4+3]
+                        );
+                    };
+                    
+                    printMat("vp0", vp[0]);
+                    printMat("vp1", vp[1]);
+
+                    GL(glUniformMatrix4fv(m_modelUniformLocation, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&model)));
+                    GL(glUniformMatrix4fv(m_viewProjectionUniformLocation, size, GL_FALSE, reinterpret_cast<const GLfloat*>(vp)));
+                    GL(glUniformMatrix4fv(m_depthViewProjectionUniformLocation, size, GL_FALSE, reinterpret_cast<const GLfloat*>(edoParams->depthViewProj)));
+                    GL(glUniform1i(m_depthTextureUniformLocation, 0));
+                    GL(glActiveTexture(GL_TEXTURE0));
+                    GL(glBindTexture(GL_TEXTURE_2D_ARRAY, edoParams->depthTex));
+                }
                 GL(glUniform4fv(m_tintColorUniformLocation, 1, reinterpret_cast<const GLfloat*>(&mesh.tintColor)));
                 GL(glUniform1f(m_alphaUniformLocation, mesh.alpha));
 
@@ -1547,20 +1699,7 @@ namespace Conformance
                 drawMesh(mesh);
             }
         }
-
-
-        // Render each gltf
-        for (const auto& gltfDrawable : params.glTFs) {
-            GLGLTF& gltf = m_gltfInstances[gltfDrawable.handle];
-            // Compute and update the model transform.
-
-            XrMatrix4x4f modelToWorld = Matrix::FromTranslationRotationScale(
-                gltfDrawable.params.pose.position, gltfDrawable.params.pose.orientation, gltfDrawable.params.scale);
-
-            m_pbrResources->SetViewProjection(view, proj);
-
-            gltf.Render(*m_pbrResources, modelToWorld);
-        }
+        
         } else {
 
             GL(glUseProgram(m_motionVectorProgram));
