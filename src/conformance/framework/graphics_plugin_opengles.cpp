@@ -154,14 +154,16 @@ namespace Conformance
     }
     )_";
 
-    static const char* OCCLUSION_VERTEX_SHADER = R"_(#version 320 es
+    static const char* OCCLUSION_VERTEX_SHADER = R"_(#version 300 es
     #define NUM_VIEWS 2
     #define VIEW_ID gl_ViewID_OVR
-    #extension GL_OVR_multiview2 : require
+    #extension GL_OVR_multiview : enable
+    #extension GL_OVR_multiview2 : enable
+    #extension GL_OVR_multiview_multisampled_render_to_texture : enable
     layout(num_views=NUM_VIEWS) in;
 
-    in vec3 vertexPos;
-    in vec3 vertexColor;
+    in vec3 VertexPos;
+    in vec3 VertexColor;
 
     uniform mat4 ModelMatrix;
     uniform mat4 ViewProjectionMatrix[NUM_VIEWS];
@@ -170,16 +172,19 @@ namespace Conformance
     out vec4 PSVertexColor;
     out vec4 cubeWorldPosition;
     void main() {
-        cubeWorldPosition = ModelMatrix * vec4(vertexPos, 1.0f);
+        cubeWorldPosition = ModelMatrix * vec4(VertexPos, 1.0f);
         gl_Position = ViewProjectionMatrix[VIEW_ID] * cubeWorldPosition;
-        PSVertexColor = vec4(mix(vertexColor, tintColor.rgb, tintColor.a), 1.0f);
+        gl_Position = vec4(VertexPos, 1.0f);
+        PSVertexColor = vec4(mix(VertexColor, tintColor.rgb, tintColor.a), 1.0f);
     }
     )_";
 
-    static const char* OCCLUSION_FRAGMENT_SHADER = R"_(#version 320 es
+    static const char* OCCLUSION_FRAGMENT_SHADER = R"_(#version 300 es
     #define NUM_VIEWS 2
     #define VIEW_ID gl_ViewID_OVR
-    #extension GL_OVR_multiview2 : require
+    #extension GL_OVR_multiview : enable
+    #extension GL_OVR_multiview2 : enable
+    #extension GL_OVR_multiview_multisampled_render_to_texture : enable
 
     in lowp vec4 PSVertexColor;
     in lowp vec4 cubeWorldPosition;
@@ -216,11 +221,9 @@ namespace Conformance
       else {
         outColor = vec4(0.0f, 0.0f, 0.0f, 0.0f); // invisible
       }
-      outColor = vec4(depthViewEyeZ, depthViewEyeZ, depthViewEyeZ, 0.0f); // invisible
-      outColor = vec4(0.0f, 1.0f, 1.0f, 1.0f); // invisible
+      outColor = vec4(depthViewEyeZ, depthViewEyeZ, depthViewEyeZ, 1.0f); // invisible
   
-      //gl_FragDepth = cubeDepth;
-      //gl_FragDepth = 0.0f;
+      gl_FragDepth = cubeDepth;
     }
     )_";
 
@@ -729,6 +732,7 @@ namespace Conformance
         if(multiview_enable){
             if(edo_enalble){
                 GL(glShaderSource(fragmentShader, 1, &OCCLUSION_FRAGMENT_SHADER, nullptr));
+                //GL(glShaderSource(fragmentShader, 1, &FragmentShaderGlslMultiview, nullptr));
             } else {
                 GL(glShaderSource(fragmentShader, 1, &FragmentShaderGlslMultiview, nullptr));
             }
@@ -1539,7 +1543,7 @@ namespace Conformance
 
         GL(glEnable(GL_SCISSOR_TEST));
         GL(glDisable(GL_DEPTH_TEST));
-        GL(glDisable(GL_CULL_FACE));
+        GL(glEnable(GL_CULL_FACE));
         GL(glFrontFace(GL_CW));
         GL(glCullFace(GL_BACK));
 
@@ -1632,15 +1636,18 @@ namespace Conformance
                         );
                     };
                     
-                    printMat("vp0", vp[0]);
-                    printMat("vp1", vp[1]);
+                    //printMat("vp0", vp[0]);
+                    //printMat("vp1", vp[1]);
 
                     GL(glUniformMatrix4fv(m_modelUniformLocation, 1, GL_FALSE, reinterpret_cast<const GLfloat*>(&model)));
                     GL(glUniformMatrix4fv(m_viewProjectionUniformLocation, size, GL_FALSE, reinterpret_cast<const GLfloat*>(vp)));
                     GL(glUniformMatrix4fv(m_depthViewProjectionUniformLocation, size, GL_FALSE, reinterpret_cast<const GLfloat*>(edoParams->depthViewProj)));
-                    GL(glUniform1i(m_depthTextureUniformLocation, 0));
+
+                    ALOGE("%s:depthTex=%d, %d",__func__,edoParams->depthTex, m_depthTextureUniformLocation);
+
                     GL(glActiveTexture(GL_TEXTURE0));
                     GL(glBindTexture(GL_TEXTURE_2D_ARRAY, edoParams->depthTex));
+                    GL(glUniform1i(m_depthTextureUniformLocation, 0));
                 }
                 GL(glUniform4fv(m_tintColorUniformLocation, 1, reinterpret_cast<const GLfloat*>(&mesh.tintColor)));
                 GL(glUniform1f(m_alphaUniformLocation, mesh.alpha));

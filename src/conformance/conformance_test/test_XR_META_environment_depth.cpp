@@ -455,7 +455,7 @@ namespace Conformance
                 env_depth_acq_result_.pose[1] = envDepthImage.views[1].pose;
                 env_depth_acq_result_.fov[0] = envDepthImage.views[0].fov;
                 env_depth_acq_result_.fov[1] = envDepthImage.views[1].fov;
-                ALOGE("%s:index:%d, texture:%d, isVulkan:%d", __FUNCTION__, envDepthImage.swapchainIndex, env_depth_acq_result_.texture, isVulkan);
+                ALOGE("%s:index:%d, texture:%p, isVulkan:%d", __FUNCTION__, envDepthImage.swapchainIndex, env_depth_acq_result_.texture, isVulkan);
             }
 
             const int size = 2;

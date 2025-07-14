@@ -53,7 +53,7 @@ void main()
     else {
     FragColor = vec4(0.0f, 0.0f, 0.0f, 0.0f); // invisible
     }
-    FragColor = vec4(1.0f, 1.0f, 0.0f, 0.0f); // invisible
+    FragColor = vec4(depthViewEyeZ, depthViewEyeZ, depthViewEyeZ, 1.0f); // invisible
   
     gl_FragDepth = cubeDepth;
 }

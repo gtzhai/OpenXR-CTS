@@ -2720,6 +2720,7 @@ namespace Conformance
                     ubuf.tintColor = mesh.tintColor;
                     ubuf.mvp = mvp[0];
                     ubuf.p0  = mvp[1];
+                    ubuf.p1  = model;
                     ubuf.alpha.x = mesh.alpha;
                     vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
 
