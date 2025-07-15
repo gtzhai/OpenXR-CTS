@@ -996,7 +996,7 @@ namespace Conformance
                 rpInfo2.dependencyCount = 0;
 
                 if(multiview_enable){
-                    renderPassMultiviewCI.pNext = rpInfo.pNext;
+                    renderPassMultiviewCI.pNext = rpInfo2.pNext;
                     rpInfo2.pNext = &renderPassMultiviewCI;
                 }
 
@@ -1004,6 +1004,10 @@ namespace Conformance
 
                 XRC_CHECK_THROW_VKCMD(vkCreateRenderPass2KHR(m_vkDevice, &rpInfo2, nullptr, &pass));
             } else {
+                if(multiview_enable){
+                    renderPassMultiviewCI.pNext = rpInfo.pNext;
+                    rpInfo.pNext = &renderPassMultiviewCI;
+                }
                 XRC_CHECK_THROW_VKCMD(vkCreateRenderPass(m_vkDevice, &rpInfo, nullptr, &pass));
             }
             #else
@@ -1357,10 +1361,12 @@ namespace Conformance
                 pipelineLayoutCreateInfo.pushConstantRangeCount = 1;
                 pipelineLayoutCreateInfo.pPushConstantRanges = &pcr;
 
+                ALOGE("pipelinelayout:%d", edo_enalble);
+
                 if(edo_enalble){
                     VkDescriptorSetLayoutBinding descriptorSetBindings[2]{};
                     descriptorSetBindings[0].binding = 0;
-                    descriptorSetBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                    descriptorSetBindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                     descriptorSetBindings[0].descriptorCount = 1;
                     descriptorSetBindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
@@ -1381,6 +1387,7 @@ namespace Conformance
                 }
 
                 XRC_CHECK_THROW_VKCMD(vkCreatePipelineLayout(m_vkDevice, &pipelineLayoutCreateInfo, nullptr, &layout));
+                ALOGE("pipelinelayout:%p", layout);
             } break;
             case SHADER_PROGRAM_TYPE_COMPUTE: {
                 VkDescriptorSetLayoutBinding descriptorSetBindings[2]{};
@@ -1523,6 +1530,8 @@ namespace Conformance
             pipeInfo.layout = layout.layout;
             pipeInfo.renderPass = rp.pass;
             pipeInfo.subpass = 0;
+
+            ALOGE("pipelinelayt:pipe:%p", layout.layout);
 
             Create(device, pipeInfo);
         }

@@ -978,7 +978,7 @@ namespace Conformance
                 }
             }
 
-            ReportF("%s (%s 0x%" PRIu64 ") %s", flagNames.c_str(), objName.c_str(), object, pCallbackData->pMessage);
+            ALOGE("%s (%s 0x%" PRIu64 ") %s", flagNames.c_str(), objName.c_str(), object, pCallbackData->pMessage);
 
             return VK_FALSE;
         }
@@ -1145,14 +1145,22 @@ namespace Conformance
         return pfnCreateVulkanDeviceKHR(instance, createInfo, vulkanDevice, vulkanResult);
     }
 
-    static VkDescriptorPool CreateDescriptorPool(VkDevice device, uint32_t maxSets, uint32_t descriptorCount)
+    static VkDescriptorPool CreateDescriptorPool(VkDevice device, uint32_t maxSets, uint32_t descriptorCount, bool isGfx=false)
     {
         VkDescriptorPoolSize poolSizes[2]{};
-        poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        poolSizes[0].descriptorCount = descriptorCount;
+        if(isGfx){
+            poolSizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            poolSizes[0].descriptorCount = descriptorCount;
 
-        poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        poolSizes[1].descriptorCount = descriptorCount;
+            poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            poolSizes[1].descriptorCount = descriptorCount;
+        } else {
+            poolSizes[0].type = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            poolSizes[0].descriptorCount = descriptorCount;
+
+            poolSizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            poolSizes[1].descriptorCount = descriptorCount;
+        }
 
         VkDescriptorPoolCreateInfo descriptorPoolInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         descriptorPoolInfo.maxSets = maxSets;
@@ -1353,9 +1361,9 @@ namespace Conformance
         VkDebugUtilsMessengerCreateInfoEXT debugInfo{VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
         debugInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT;
         debugInfo.messageType = VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;
-#if !defined(NDEBUG)
+//#if !defined(NDEBUG)
         debugInfo.messageSeverity |= VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT;
-#endif
+//#endif
         debugInfo.pfnUserCallback = debugMessageThunk;
         debugInfo.pUserData = this;
 
@@ -1427,7 +1435,7 @@ namespace Conformance
             appInfo.applicationVersion = 1;
             appInfo.pEngineName = "conformance_test";
             appInfo.engineVersion = 1;
-            appInfo.apiVersion = VK_API_VERSION_1_0;
+            appInfo.apiVersion = VK_API_VERSION_1_2;
 
             VkInstanceCreateInfo instInfo{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
             instInfo.pNext = &debugInfo;
@@ -1706,7 +1714,7 @@ namespace Conformance
         XRC_CHECK_THROW_VKCMD(vkAllocateDescriptorSets(m_vkDevice, &allocInfo, &m_ComputeDescriptorSet));
 
         if(edo_enalble){
-            m_gfxDescriptorPool.adopt(CreateDescriptorPool(m_vkDevice, 1, 1), m_vkDevice);
+            m_gfxDescriptorPool.adopt(CreateDescriptorPool(m_vkDevice, 1, 1, true), m_vkDevice);
 
             VkDescriptorSetAllocateInfo allocInfo{VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO};
             allocInfo.descriptorPool = m_gfxDescriptorPool.get();
@@ -2672,6 +2680,8 @@ namespace Conformance
                     {
                         ubo.vp[0] = edoParams->depthViewProj[0];
                         ubo.vp[1] = edoParams->depthViewProj[1];
+                        ubo.vp[0].m[0] = 1.0f;
+                        ubo.vp[1].m[0] = 1.0f;
                         uboBuffer.Update<uint8_t>(m_vkDevice, {uboData, static_cast<size_t>(bufferCreateInfo.size)}, 0);
 
                         VkImageView depthImageView = depthView;
@@ -2691,20 +2701,30 @@ namespace Conformance
 
                         VkWriteDescriptorSet writeDescriptorSets[2]{};
                         writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        writeDescriptorSets[0].dstSet = m_ComputeDescriptorSet;
+                        writeDescriptorSets[0].dstSet = m_gfxDescriptorSet;
                         writeDescriptorSets[0].dstBinding = depthImageBinding;
                         writeDescriptorSets[0].descriptorCount = 1;
-                        writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+                        writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;//VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
                         writeDescriptorSets[0].pImageInfo = &depthImageInfo;
 
                         writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        writeDescriptorSets[1].dstSet = m_ComputeDescriptorSet;
+                        writeDescriptorSets[1].dstSet = m_gfxDescriptorSet;
                         writeDescriptorSets[1].dstBinding = uboBinding;
                         writeDescriptorSets[1].descriptorCount = 1;
                         writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                         writeDescriptorSets[1].pBufferInfo = &uboInfo;
 
                         vkUpdateDescriptorSets(m_vkDevice, (uint32_t)ArraySize(writeDescriptorSets), writeDescriptorSets, 0, NULL);
+
+                        vkCmdBindDescriptorSets(
+                            m_cmdBuffer.buf,
+                            VK_PIPELINE_BIND_POINT_GRAPHICS,
+                            m_pipelineLayout.layout,     
+                            0,                  
+                            1,               
+                            &m_gfxDescriptorSet,        
+                            0,
+                            nullptr);
                     }
 
 

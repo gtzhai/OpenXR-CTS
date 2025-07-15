@@ -39,6 +39,7 @@ void main()
     // Sample from Environment Depth API texture
     highp vec3 depthViewCoord = vec3(cubeDepthCameraPositionHC, VIEW_ID);
     highp float depthViewEyeZ = texture(EnvironmentDepthTexture, depthViewCoord).r;
+    depthViewEyeZ = texture(EnvironmentDepthTexture, vec3(0.5f, 0.5f, VIEW_ID)).r;
   
     // Get virtual object depth
     highp float cubeDepth = cubeDepthCameraPosition.z / cubeDepthCameraPosition.w;
@@ -54,6 +55,9 @@ void main()
     FragColor = vec4(0.0f, 0.0f, 0.0f, 0.0f); // invisible
     }
     FragColor = vec4(depthViewEyeZ, depthViewEyeZ, depthViewEyeZ, 1.0f); // invisible
+    //FragColor = vec4(cubeDepthCameraPositionHC.x, cubeDepthCameraPositionHC.y, 0.0f, 1.0f); // invisible
+    //mat4 tmp = dbuf.vp[VIEW_ID];
+    //FragColor = vec4(tmp[0][0], tmp[0][0], VIEW_ID, 1.0f); // invisible
   
     gl_FragDepth = cubeDepth;
 }

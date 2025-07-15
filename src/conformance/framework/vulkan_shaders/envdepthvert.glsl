@@ -40,4 +40,5 @@ void main()
     oColor.rgb = mix(Color.rgb, ubuf.tintColor.rgb, ubuf.tintColor.a);
     oColor.a  = ubuf.alpha.x;
     gl_Position = ubuf.vp[gl_ViewIndex] * oCubeWorldPosition;
+    //gl_Position = vec4(Position, 1.0f);
 }

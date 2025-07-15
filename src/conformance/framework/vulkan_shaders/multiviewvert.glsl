@@ -13,8 +13,7 @@
 
 layout (std140, push_constant) uniform buf
 {
-    mat4 mvp;
-    mat4 mvp2;
+    mat4 mvp[2];
     mat4 p1;
     vec4 tintColor;
     vec4 alpha;
@@ -35,12 +34,5 @@ void main()
 {
     oColor.rgb = mix(Color.rgb, ubuf.tintColor.rgb, ubuf.tintColor.a);
     oColor.a  = ubuf.alpha.x;
-    if(gl_ViewIndex == 0)
-    {
-        gl_Position = ubuf.mvp * vec4(Position, 1);
-    }
-    else
-    {
-        gl_Position = ubuf.mvp2 * vec4(Position, 1);
-    }
+    gl_Position = ubuf.mvp[gl_ViewIndex] * vec4(Position, 1);
 }
