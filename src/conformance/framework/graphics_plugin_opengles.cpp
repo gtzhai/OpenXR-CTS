@@ -174,7 +174,7 @@ namespace Conformance
     void main() {
         cubeWorldPosition = ModelMatrix * vec4(VertexPos, 1.0f);
         gl_Position = ViewProjectionMatrix[VIEW_ID] * cubeWorldPosition;
-        gl_Position = vec4(VertexPos, 1.0f);
+        //gl_Position = vec4(VertexPos, 1.0f);
         PSVertexColor = vec4(mix(VertexColor, tintColor.rgb, tintColor.a), 1.0f);
     }
     )_";
@@ -1647,6 +1647,8 @@ namespace Conformance
 
                     GL(glActiveTexture(GL_TEXTURE0));
                     GL(glBindTexture(GL_TEXTURE_2D_ARRAY, edoParams->depthTex));
+                    GL(glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST));
+                    GL(glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST));
                     GL(glUniform1i(m_depthTextureUniformLocation, 0));
                 }
                 GL(glUniform4fv(m_tintColorUniformLocation, 1, reinterpret_cast<const GLfloat*>(&mesh.tintColor)));

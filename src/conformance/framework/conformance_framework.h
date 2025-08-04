@@ -395,8 +395,8 @@ namespace Conformance
         XrBaseInStructure* requiredPlatformInstanceCreateStruct{};
 
         bool isUsingMSAA{false};
-        bool isUsingMultiView{true};
-        bool isUsingEnvDepthOcclusion{true};
+        bool isUsingMultiView{false};
+        bool isUsingEnvDepthOcclusion{false};
 
     private:
         VersionDependentDataArray versionDependentData;
