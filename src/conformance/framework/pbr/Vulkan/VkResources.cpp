@@ -321,7 +321,7 @@ namespace Pbr
             allocator.Init(physicalDevice_, device);
 
             Internal::ThrowIf(!copyCmdBuffer.Init(objnamer, device_, queueFamilyIndex), "Failed to create command buffer");
-            copyCmdBuffer.Begin();
+            copyCmdBuffer.Begin(false);
 
             PipelineLayout::SetupBindings(VulkanLayout);
 
@@ -684,15 +684,15 @@ namespace Pbr
 
     void VulkanResources::SubmitFrameResources(VkQueue queue) const
     {
-        m_impl->copyCmdBuffer.End();
-        m_impl->copyCmdBuffer.Exec(queue);
+        m_impl->copyCmdBuffer.End(false);
+        m_impl->copyCmdBuffer.Exec(queue, false);
     }
 
     void VulkanResources::Wait() const
     {
         m_impl->copyCmdBuffer.Wait();
         m_impl->copyCmdBuffer.Clear();
-        m_impl->copyCmdBuffer.Begin();
+        m_impl->copyCmdBuffer.Begin(false);
 
         for (auto stagingBuffer : m_impl->Resources.StagingBuffers) {
             stagingBuffer.Reset(GetDevice());

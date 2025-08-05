@@ -844,7 +844,7 @@ GLenum ksGpuContext_InternalSurfaceDepthFormat(const ksGpuSurfaceDepthFormat dep
 
 static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevice *device, const int queueIndex,
                                           const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                                          const ksGpuSampleCount sampleCount, HINSTANCE hInstance, HDC hDC) {
+                                          const ksGpuSampleCount sampleCount, HINSTANCE hInstance, HDC hDC, bool protect) {
     UNUSED_PARM(queueIndex);
 
     context->device = device;
@@ -994,7 +994,8 @@ static int glxGetFBConfigAttrib2(Display *dpy, GLXFBConfig config, int attribute
 
 static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevice *device, const int queueIndex,
                                           const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                                          const ksGpuSampleCount sampleCount, Display *xDisplay, int xScreen) {
+                                          const ksGpuSampleCount sampleCount, Display *xDisplay, int xScreen, bool protect) {
+
     UNUSED_PARM(queueIndex);
 
     context->device = device;
@@ -1122,7 +1123,7 @@ static uint32_t xcb_glx_get_property(const uint32_t *properties, const uint32_t 
 
 static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevice *device, const int queueIndex,
                                           const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                                          const ksGpuSampleCount sampleCount, xcb_connection_t *connection, int screen_number) {
+                                          const ksGpuSampleCount sampleCount, xcb_connection_t *connection, int screen_number, bool protect) {
     UNUSED_PARM(queueIndex);
 
     context->device = device;
@@ -1249,7 +1250,7 @@ static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevi
 
 #elif defined(OS_LINUX_WAYLAND)
 
-static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevice *device, struct wl_display *native_display) {
+static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevice *device, struct wl_display *native_display, bool protect) {
     context->device = device;
 
     EGLint numConfigs;
@@ -1329,7 +1330,7 @@ static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevi
 
 static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevice *device, const int queueIndex,
                                           const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                                          const ksGpuSampleCount sampleCount, CGDirectDisplayID display) {
+                                          const ksGpuSampleCount sampleCount, CGDirectDisplayID display, bool protect) {
     UNUSED_PARM(queueIndex);
 
     context->device = device;
@@ -1376,7 +1377,8 @@ static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevi
 
 static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevice *device, const int queueIndex,
                                           const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                                          const ksGpuSampleCount sampleCount, EGLDisplay display) {
+                                          const ksGpuSampleCount sampleCount, EGLDisplay display, bool protect) {
+
     context->device = device;
 
     context->display = display;
@@ -1429,20 +1431,36 @@ static bool ksGpuContext_CreateForSurface(ksGpuContext *context, const ksGpuDevi
         return false;
     }
 
-    EGLint contextAttribs[] = {EGL_CONTEXT_CLIENT_VERSION, OPENGL_VERSION_MAJOR, EGL_NONE, EGL_NONE, EGL_NONE};
+    EGLint contextAttribs[] = {EGL_CONTEXT_CLIENT_VERSION, OPENGL_VERSION_MAJOR, EGL_PROTECTED_CONTENT_EXT, EGL_FALSE,EGL_NONE, EGL_NONE, EGL_NONE};
+    if(protect) contextAttribs[3] = EGL_TRUE;
+    else {
+        contextAttribs[2] = EGL_NONE;
+        contextAttribs[3] = EGL_NONE;
+    }
     // Use the default priority if KS_GPU_QUEUE_PRIORITY_MEDIUM is selected.
     const ksGpuQueuePriority priority = device->queueInfo.queuePriorities[queueIndex];
     if (priority != KS_GPU_QUEUE_PRIORITY_MEDIUM) {
-        contextAttribs[2] = EGL_CONTEXT_PRIORITY_LEVEL_IMG;
-        contextAttribs[3] = (priority == KS_GPU_QUEUE_PRIORITY_LOW) ? EGL_CONTEXT_PRIORITY_LOW_IMG : EGL_CONTEXT_PRIORITY_HIGH_IMG;
+        contextAttribs[4] = EGL_CONTEXT_PRIORITY_LEVEL_IMG;
+        contextAttribs[5] = (priority == KS_GPU_QUEUE_PRIORITY_LOW) ? EGL_CONTEXT_PRIORITY_LOW_IMG : EGL_CONTEXT_PRIORITY_HIGH_IMG;
     }
-    context->context = eglCreateContext(display, context->config, EGL_NO_CONTEXT, contextAttribs);
+    if(context->scontext != NULL){
+        context->context = eglCreateContext(display, context->config, context->scontext->context, contextAttribs);
+    } else {
+        context->context = eglCreateContext(display, context->config, EGL_NO_CONTEXT, contextAttribs);
+    }
     if (context->context == EGL_NO_CONTEXT) {
         Error("eglCreateContext() failed: %s", EglErrorString(eglGetError()));
         return false;
     }
 
-    const EGLint surfaceAttribs[] = {EGL_WIDTH, 16, EGL_HEIGHT, 16, EGL_NONE};
+    EGLint surfaceAttribs[] = {EGL_WIDTH, 16, EGL_HEIGHT, 16,EGL_PROTECTED_CONTENT_EXT, EGL_FALSE, EGL_NONE};
+    if(protect) {
+        surfaceAttribs[5] = EGL_TRUE;
+    }
+    else {
+        surfaceAttribs[4] = EGL_NONE;
+        surfaceAttribs[5] = EGL_NONE;
+    }
     context->tinySurface = eglCreatePbufferSurface(display, context->config, surfaceAttribs);
     if (context->tinySurface == EGL_NO_SURFACE) {
         Error("eglCreatePbufferSurface() failed: %s", EglErrorString(eglGetError()));
@@ -1821,7 +1839,7 @@ void ksGpuWindow_Destroy(ksGpuWindow *window) {
 
 bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const ksGpuQueueInfo *queueInfo, int queueIndex,
                         ksGpuSurfaceColorFormat colorFormat, ksGpuSurfaceDepthFormat depthFormat, ksGpuSampleCount sampleCount,
-                        int width, int height, bool fullscreen) {
+                        int width, int height, bool fullscreen, bool protect) {
     memset(window, 0, sizeof(ksGpuWindow));
 
     window->colorFormat = colorFormat;
@@ -1945,7 +1963,7 @@ bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const k
 
     ksGpuDevice_Create(&window->device, instance, queueInfo);
     ksGpuContext_CreateForSurface(&window->context, &window->device, queueIndex, colorFormat, depthFormat, sampleCount,
-                                  window->hInstance, window->hDC);
+                                  window->hInstance, window->hDC, protect);
     ksGpuContext_SetCurrent(&window->context);
 
     ShowWindow(window->hWnd, SW_SHOW);
@@ -2099,7 +2117,7 @@ void ksGpuWindow_Destroy(ksGpuWindow *window) {
 
 bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const ksGpuQueueInfo *queueInfo, const int queueIndex,
                         const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen) {
+                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen, bool protect) {
     memset(window, 0, sizeof(ksGpuWindow));
 
     window->colorFormat = colorFormat;
@@ -2135,7 +2153,7 @@ bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const k
 
     ksGpuDevice_Create(&window->device, instance, queueInfo);
     ksGpuContext_CreateForSurface(&window->context, &window->device, queueIndex, colorFormat, depthFormat, sampleCount,
-                                  window->xDisplay, window->xScreen);
+                                  window->xDisplay, window->xScreen, protect);
 
     window->xVisual = glXGetVisualFromFBConfig(window->xDisplay, window->context.glxFBConfig);
     if (window->xVisual == NULL) {
@@ -2449,7 +2467,7 @@ void ksGpuWindow_Destroy(ksGpuWindow *window) {
 
 bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const ksGpuQueueInfo *queueInfo, const int queueIndex,
                         const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen) {
+                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen, bool protect) {
     memset(window, 0, sizeof(ksGpuWindow));
 
     window->colorFormat = colorFormat;
@@ -2493,10 +2511,10 @@ bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const k
 #if defined(OS_LINUX_XCB_GLX)
     window->xDisplay = XOpenDisplay(displayName);
     ksGpuContext_CreateForSurface(&window->context, &window->device, queueIndex, colorFormat, depthFormat, sampleCount,
-                                  window->xDisplay, screen_number);
+                                  window->xDisplay, screen_number, protect);
 #else
     ksGpuContext_CreateForSurface(&window->context, &window->device, queueIndex, colorFormat, depthFormat, sampleCount,
-                                  window->connection, screen_number);
+                                  window->connection, screen_number, protect);
 #endif
 
     // Create the color map.
@@ -2773,7 +2791,7 @@ const struct wl_registry_listener registry_listener = {_registry_cb, _registry_r
 
 bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const ksGpuQueueInfo *queueInfo, const int queueIndex,
                         const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen) {
+                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen, bool protect) {
     (void)queueIndex;
     memset(window, 0, sizeof(ksGpuWindow));
 
@@ -2859,7 +2877,7 @@ bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const k
 
     ksGpuDevice_Create(&window->device, instance, queueInfo);
 
-    ksGpuContext_CreateForSurface(&window->context, &window->device, window->display);
+    ksGpuContext_CreateForSurface(&window->context, &window->device, window->display, protect);
 
     ksGpuContext_SetCurrent(&window->context);
 
@@ -3061,7 +3079,7 @@ void ksGpuWindow_Destroy(ksGpuWindow *window) {
 
 bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const ksGpuQueueInfo *queueInfo, const int queueIndex,
                         const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen) {
+                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen, bool protect) {
     memset(window, 0, sizeof(ksGpuWindow));
 
     window->colorFormat = colorFormat;
@@ -3187,7 +3205,7 @@ bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const k
 
     ksGpuDevice_Create(&window->device, instance, queueInfo);
     ksGpuContext_CreateForSurface(&window->context, &window->device, queueIndex, colorFormat, depthFormat, sampleCount,
-                                  window->display);
+                                  window->display, protect);
 
     [window->context.nsContext setView:window->nsView];
 
@@ -3292,7 +3310,7 @@ void ksGpuWindow_Destroy(ksGpuWindow *window) {
 
 bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const ksGpuQueueInfo *queueInfo, const int queueIndex,
                         const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen) {
+                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen, bool protect) {
     memset(window, 0, sizeof(ksGpuWindow));
 
     window->colorFormat = colorFormat;
@@ -3329,8 +3347,8 @@ void ksGpuWindow_Destroy(ksGpuWindow *window) {
 
 bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const ksGpuQueueInfo *queueInfo, const int queueIndex,
                         const ksGpuSurfaceColorFormat colorFormat, const ksGpuSurfaceDepthFormat depthFormat,
-                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen) {
-    memset(window, 0, sizeof(ksGpuWindow));
+                        const ksGpuSampleCount sampleCount, const int width, const int height, const bool fullscreen, bool protect) {
+    //memset(window, 0, sizeof(ksGpuWindow));
     (void)fullscreen;
 
     window->colorFormat = colorFormat;
@@ -3349,7 +3367,7 @@ bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const k
 
     ksGpuDevice_Create(&window->device, instance, queueInfo);
     ksGpuContext_CreateForSurface(&window->context, &window->device, queueIndex, colorFormat, depthFormat, sampleCount,
-                                  window->display);
+                                  window->display, protect);
     ksGpuContext_SetCurrent(&window->context);
 
     GlInitExtensions();

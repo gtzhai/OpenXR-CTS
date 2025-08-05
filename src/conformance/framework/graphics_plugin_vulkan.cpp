@@ -360,8 +360,9 @@ namespace Conformance
         const XrSwapchainImageVulkanKHR& GetFallbackDepthSwapchainImage(uint32_t i) override
         {
             if (!m_depthBuffer[i].Allocated()) {
+                bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
                 m_depthBuffer[i].Allocate(m_namer, m_vkDevice, m_memAllocator, m_depthFormat, this->Width(), this->Height(),
-                                          this->ArraySize(), this->SampleCount());
+                                          this->ArraySize(), this->SampleCount(), isProtectedMemory);
             }
 
             return m_depthBuffer[i].GetTexture();
@@ -370,13 +371,14 @@ namespace Conformance
     private:
         #ifdef FEATURE_ADD_MSAA
         void prepareMSAAImages( VkFormat colorFormat, VkFormat depthFormat){
+            bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
             for (auto& depthBuffer : m_depthBufferMSAA) {
                 depthBuffer.Allocate(m_namer, m_vkDevice, m_memAllocator, depthFormat, this->Width(), this->Height(),
-                                     this->ArraySize(), 4);
+                                     this->ArraySize(), 4, isProtectedMemory);
             }
             for (auto& colorBuffer : m_colorBufferMSAA) {
                 colorBuffer.Allocate(m_namer, m_vkDevice, m_memAllocator, colorFormat, this->Width(), this->Height(),
-                                     this->ArraySize(), 4);
+                                     this->ArraySize(), 4, isProtectedMemory);
             }
         }
         #endif
@@ -742,6 +744,8 @@ namespace Conformance
         bool IsInitialized() const override;
 
         void Shutdown() override;
+        void enum_vulkan_instance_exts();
+        void enum_vulkan_device_exts();
 
         std::string DescribeGraphics() const override;
 
@@ -817,18 +821,22 @@ namespace Conformance
         void Checkpoint(std::string msg)
         {
             auto check = checkpoints.emplace(std::move(msg));
-            vkCmdSetCheckpointNV(m_cmdBuffer.buf, check.first->c_str());
+            bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+            VkCommandBuffer buf = isProtectedMemory?m_cmdBuffer.bufP:m_cmdBuffer.buf;
+            vkCmdSetCheckpointNV(buf, check.first->c_str());
         }
 
         void ShowCheckpoints()
         {
-            if (m_vkQueue != VK_NULL_HANDLE) {
+            bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+            VkQueue queue = isProtectedMemory?m_vkQueueProtected:m_vkQueue;
+            if (queue != VK_NULL_HANDLE) {
                 uint32_t count = 0;
-                vkGetQueueCheckpointDataNV(m_vkQueue, &count, nullptr);
+                vkGetQueueCheckpointDataNV(queue, &count, nullptr);
                 ReportF("ShowCheckpoints found %u checkpoints", count);
                 if (count > 0) {
                     std::vector<VkCheckpointDataNV> data(count);
-                    vkGetQueueCheckpointDataNV(m_vkQueue, &count, &data[0]);
+                    vkGetQueueCheckpointDataNV(queue, &count, &data[0]);
                     for (uint32_t i = 0; i < count; ++i) {
                         auto& c = data[i];
                         std::string stages = GetPipelineStages(c.stage);
@@ -852,6 +860,7 @@ namespace Conformance
         VulkanDebugObjectNamer m_namer{};
         uint32_t m_queueFamilyIndex = 0;
         VkQueue m_vkQueue{VK_NULL_HANDLE};
+        VkQueue m_vkQueueProtected{VK_NULL_HANDLE};
         VkSemaphore m_vkDrawDone{VK_NULL_HANDLE};
 
         MemoryAllocator m_memAllocator{};
@@ -1260,13 +1269,24 @@ namespace Conformance
             deviceInfo.pEnabledFeatures = &features;
             deviceInfo.enabledExtensionCount = (uint32_t)extensions.size();
             deviceInfo.ppEnabledExtensionNames = extensions.empty() ? nullptr : extensions.data();
+
+            VkPhysicalDeviceVulkan11Features physicalDeviceFeatures{
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+                .pNext = NULL,
+                .multiview = VK_TRUE,
+                .protectedMemory = VK_TRUE,
+            };
+            
             if(multiview_enable){
-                deviceInfo.pNext = &physicalDeviceMultiviewFeatures;
+                physicalDeviceFeatures.pNext = &physicalDeviceMultiviewFeatures;
             }
+
+            deviceInfo.pNext = &physicalDeviceFeatures;
+            deviceInfo.queueCreateInfoCount = 2;
 
             auto pfnCreateDevice = (PFN_vkCreateDevice)createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkCreateDevice");
             *vulkanResult = pfnCreateDevice(m_vkPhysicalDevice, &deviceInfo, createInfo->vulkanAllocator, vulkanDevice);
-            ALOGE("%s:xxxxxx:vulkanDevice:%p", *vulkanDevice);
+            ALOGE("%s:xxxxxx:vulkanDevice:%p", __func__, *vulkanDevice);
         }
 
         return XR_SUCCESS;
@@ -1294,6 +1314,41 @@ namespace Conformance
         if (initialized) {
             // To do.
             initialized = false;
+        }
+    }
+
+    void VulkanGraphicsPlugin::enum_vulkan_instance_exts() {
+        uint32_t extensionCount = 0;
+        vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
+
+        std::vector<VkExtensionProperties> extensions(extensionCount);
+
+        vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data());
+
+        ALOGE("Available Vulkan instance extensions:\n");
+        for (const auto& ext : extensions) {
+            ALOGE("\t%s", ext.extensionName);
+        }
+    }
+
+    void VulkanGraphicsPlugin::enum_vulkan_device_exts() {
+        uint32_t extensionCount = 0;
+
+       /* vkEnumerateDeviceExtensionProperties = (PFN_vkEnumerateDeviceExtensionProperties)vkGetInstanceProcAddr(m_vkInstance, "vkEnumerateDeviceExtensionProperties");
+        if(vkEnumerateDeviceExtensionProperties == NULL){
+            Log::Write(Log::Level::Error,"vkEnumerateDeviceExtensionProperties is null");
+            return;
+        }*/
+
+        vkEnumerateDeviceExtensionProperties(m_vkPhysicalDevice, nullptr, &extensionCount, nullptr);
+
+        std::vector<VkExtensionProperties> extensions(extensionCount);
+
+        vkEnumerateDeviceExtensionProperties(m_vkPhysicalDevice, nullptr, &extensionCount, extensions.data());
+
+        ALOGE("Available Vulkan device extensions:\n");
+        for (const auto& ext : extensions) {
+            ALOGE("\t%s", ext.extensionName);
         }
     }
 
@@ -1539,19 +1594,51 @@ namespace Conformance
             physicalDeviceMultiviewFeatures.pNext = NULL;
         }
 
+        VkDeviceQueueCreateInfo queueCreateInfo[2] = {
+            {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = 0,
+                .queueCount = 1,
+                .queueFamilyIndex = m_queueFamilyIndex,
+                .pQueuePriorities = &queuePriorities,  //for swapchain create & ATW, promote the queue priority
+            },
+            {
+                .sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO,
+                .pNext = nullptr,
+                .flags = VK_DEVICE_QUEUE_CREATE_PROTECTED_BIT,
+                .queueCount = 1,
+                .queueFamilyIndex = m_queueFamilyIndex,
+                .pQueuePriorities = &queuePriorities,  //for swapchain create & ATW, promote the queue priority
+            }
+        };
 
         VkDeviceCreateInfo deviceInfo{VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO};
         deviceInfo.flags = VkDeviceCreateFlags(deviceCreationFlags);
         deviceInfo.queueCreateInfoCount = 1;
-        deviceInfo.pQueueCreateInfos = &queueInfo;
+        deviceInfo.pQueueCreateInfos =queueCreateInfo;
         deviceInfo.enabledLayerCount = 0;
         deviceInfo.ppEnabledLayerNames = nullptr;
         deviceInfo.enabledExtensionCount = (uint32_t)deviceExtensions.size();
         deviceInfo.ppEnabledExtensionNames = deviceExtensions.empty() ? nullptr : deviceExtensions.data();
         deviceInfo.pEnabledFeatures = &features;
 
+
+        VkPhysicalDeviceVulkan11Features physicalDeviceFeatures{
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+                .pNext = NULL,
+                .multiview = VK_TRUE,
+                .protectedMemory = VK_TRUE,
+        };
+        
         if(multiview_enable){
-            deviceInfo.pNext = &physicalDeviceMultiviewFeatures;
+            physicalDeviceFeatures.pNext = &physicalDeviceMultiviewFeatures;
+        }
+
+        bool isProtectedMemory = true;
+        if(isProtectedMemory){
+            deviceInfo.pNext = &physicalDeviceFeatures;
+            deviceInfo.queueCreateInfoCount = 2;
         }
 
         XrVulkanDeviceCreateInfoKHR deviceCreateInfo{XR_TYPE_VULKAN_DEVICE_CREATE_INFO_KHR};
@@ -1571,8 +1658,30 @@ namespace Conformance
         m_namer.Init(m_vkInstance, m_vkDevice);
 
         vkGetDeviceQueue(m_vkDevice, queueInfo.queueFamilyIndex, 0, &m_vkQueue);
+        if(isProtectedMemory){
+
+            PFN_vkGetDeviceQueue2 vkGetDeviceQueue2 = NULL;
+            PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr )vkGetInstanceProcAddr(m_vkInstance, "vkGetDeviceProcAddr");;
+            ALOGE("%s:vkGetDeviceProcAddr:%p", __func__, vkGetDeviceProcAddr);
+            if(vkGetDeviceProcAddr != NULL){
+                vkGetDeviceQueue2 = (PFN_vkGetDeviceQueue2)vkGetDeviceProcAddr(m_vkDevice, "vkGetDeviceQueue2");
+            }
+
+            ALOGE("%s:vkGetDeviceQueue2:%p", __func__, vkGetDeviceQueue2);
+
+            if(vkGetDeviceQueue2 != NULL){
+                VkDeviceQueueInfo2 info = {VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2};
+                info.queueFamilyIndex = m_queueFamilyIndex;
+                info.queueIndex       = 0;
+                info.flags            = VK_DEVICE_QUEUE_CREATE_PROTECTED_BIT;
+                vkGetDeviceQueue2(m_vkDevice, &info, &m_vkQueueProtected);
+            }
+        }
 
         m_memAllocator.Init(m_vkPhysicalDevice, m_vkDevice);
+
+        enum_vulkan_instance_exts();
+        enum_vulkan_device_exts();
 
         InitializeResources();
 
@@ -1743,11 +1852,14 @@ namespace Conformance
 #if defined(USE_MIRROR_WINDOW)
         m_swapchain.Create(m_vkInstance, m_vkPhysicalDevice, m_vkDevice, m_graphicsBinding.queueFamilyIndex);
 
+        bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+        VkQueue queue = isProtectedMemory?m_vkQueueProtected:m_vkQueue;
+        VkCommandBuffer buf = isProtectedMemory?m_cmdBuffer.bufP:m_cmdBuffer.buf;
         m_cmdBuffer.Clear();
-        m_cmdBuffer.Begin();
-        m_swapchain.Prepare(m_cmdBuffer.buf);
-        m_cmdBuffer.End();
-        m_cmdBuffer.Exec(m_vkQueue);
+        m_cmdBuffer.Begin(isProtectedMemory);
+        m_swapchain.Prepare(buf);
+        m_cmdBuffer.End(isProtectedMemory);
+        m_cmdBuffer.Exec(queue, isProtectedMemory);
         m_cmdBuffer.Wait();
 #endif
     }
@@ -1777,6 +1889,7 @@ namespace Conformance
 
             m_queueFamilyIndex = 0;
             m_vkQueue = VK_NULL_HANDLE;
+            m_vkQueueProtected = VK_NULL_HANDLE;
             if (m_vkDrawDone) {
                 vkDestroySemaphore(m_vkDevice, m_vkDrawDone, nullptr);
                 m_vkDrawDone = VK_NULL_HANDLE;
@@ -2244,8 +2357,11 @@ namespace Conformance
         image.CopyWithStride(data, static_cast<uint32_t>(layout.rowPitch), static_cast<uint32_t>(layout.offset));
         vkUnmapMemory(m_vkDevice, stagingMemory);
 
+        bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+        VkCommandBuffer buf = isProtectedMemory?m_cmdBuffer.bufP:m_cmdBuffer.buf;
+
         m_cmdBuffer.Clear();
-        m_cmdBuffer.Begin();
+        m_cmdBuffer.Begin(isProtectedMemory);
 
         // Switch the staging buffer from PREINITIALIZED -> TRANSFER_SRC_OPTIMAL
         VkImageMemoryBarrier imgBarrier{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
@@ -2257,7 +2373,7 @@ namespace Conformance
         imgBarrier.dstQueueFamilyIndex = m_queueFamilyIndex;
         imgBarrier.image = stagingImage;
         imgBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-        vkCmdPipelineBarrier(m_cmdBuffer.buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+        vkCmdPipelineBarrier(buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
                              &imgBarrier);
 
         // Switch the destination image from COLOR_ATTACHMENT_OPTIMAL -> TRANSFER_DST_OPTIMAL
@@ -2277,7 +2393,7 @@ namespace Conformance
         imgBarrier.dstQueueFamilyIndex = m_queueFamilyIndex;
         imgBarrier.image = swapchainImageVk->image;
         imgBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, arraySlice, 1};
-        vkCmdPipelineBarrier(m_cmdBuffer.buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
+        vkCmdPipelineBarrier(buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr, 1,
                              &imgBarrier);
 
         // Blit staging -> swapchain
@@ -2285,7 +2401,7 @@ namespace Conformance
                             {{0, 0, 0}, {(int32_t)w, (int32_t)h, 1}},
                             {VK_IMAGE_ASPECT_COLOR_BIT, 0, arraySlice, 1},
                             {{0, 0, 0}, {(int32_t)w, (int32_t)h, 1}}};
-        vkCmdBlitImage(m_cmdBuffer.buf, stagingImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, swapchainImageVk->image,
+        vkCmdBlitImage(buf, stagingImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, swapchainImageVk->image,
                        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_NEAREST);
 
         // Switch the destination image from TRANSFER_DST_OPTIMAL -> COLOR_ATTACHMENT_OPTIMAL
@@ -2306,11 +2422,11 @@ namespace Conformance
         imgBarrier.dstQueueFamilyIndex = m_queueFamilyIndex;
         imgBarrier.image = swapchainImageVk->image;
         imgBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, arraySlice, 1};
-        vkCmdPipelineBarrier(m_cmdBuffer.buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr,
+        vkCmdPipelineBarrier(buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT, 0, 0, nullptr,
                              0, nullptr, 1, &imgBarrier);
 
-        m_cmdBuffer.End();
-        m_cmdBuffer.Exec(m_vkQueue);
+        m_cmdBuffer.End(isProtectedMemory);
+        m_cmdBuffer.Exec(isProtectedMemory?m_vkQueueProtected:m_vkQueue, isProtectedMemory);
         m_cmdBuffer.Wait();
 
         vkDestroyImage(m_vkDevice, stagingImage, nullptr);
@@ -2319,9 +2435,12 @@ namespace Conformance
 
     void VulkanGraphicsPlugin::SetViewportAndScissor(const VkRect2D& rect)
     {
+        bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+        VkCommandBuffer buf = isProtectedMemory?m_cmdBuffer.bufP:m_cmdBuffer.buf;
+
         VkViewport viewport{float(rect.offset.x), float(rect.offset.y), float(rect.extent.width), float(rect.extent.height), 0.0f, 1.0f};
-        vkCmdSetViewport(m_cmdBuffer.buf, 0, 1, &viewport);
-        vkCmdSetScissor(m_cmdBuffer.buf, 0, 1, &rect);
+        vkCmdSetViewport(buf, 0, 1, &viewport);
+        vkCmdSetScissor(buf, 0, 1, &rect);
     }
 
     /// Compute image layout for the "second image" format (depth and/or stencil)
@@ -2371,8 +2490,11 @@ namespace Conformance
 
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(colorSwapchainImage);
 
+        bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+        VkCommandBuffer buf = isProtectedMemory?m_cmdBuffer.bufP:m_cmdBuffer.buf;
+
         m_cmdBuffer.Clear();
-        m_cmdBuffer.Begin();
+        m_cmdBuffer.Begin(isProtectedMemory);
 
         VkRect2D renderArea = {{0, 0}, {swapchainData->Width(), swapchainData->Height()}};
         SetViewportAndScissor(renderArea);
@@ -2393,9 +2515,9 @@ namespace Conformance
             swapchainData->TransitionLayout(imageIndex, &m_cmdBuffer, layout);
         }
 
-        vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-        swapchainData->BindPipeline(m_cmdBuffer.buf, imageArrayIndex);
+        swapchainData->BindPipeline(buf, imageArrayIndex);
 
         // Clear the buffers
         static std::array<VkClearValue, 4> clearValues;
@@ -2424,18 +2546,18 @@ namespace Conformance
 
             clearAttachments[2] = {VK_IMAGE_ASPECT_COLOR_BIT, 0, clearValues[2]};
             clearAttachments[3] = {secondAttachmentAspect, 0, clearValues[3]};
-            vkCmdClearAttachments(m_cmdBuffer.buf, 4, &clearAttachments[0], 1, &clearRect);
+            vkCmdClearAttachments(buf, 4, &clearAttachments[0], 1, &clearRect);
         } else {
-            vkCmdClearAttachments(m_cmdBuffer.buf, 2, &clearAttachments[0], 1, &clearRect);
+            vkCmdClearAttachments(buf, 2, &clearAttachments[0], 1, &clearRect);
         }
         #else
-        vkCmdClearAttachments(m_cmdBuffer.buf, 2, &clearAttachments[0], 1, &clearRect);
+        vkCmdClearAttachments(buf, 2, &clearAttachments[0], 1, &clearRect);
         #endif
 
-        vkCmdEndRenderPass(m_cmdBuffer.buf);
+        vkCmdEndRenderPass(buf);
 
-        m_cmdBuffer.End();
-        m_cmdBuffer.Exec(m_vkQueue);
+        m_cmdBuffer.End(isProtectedMemory);
+        m_cmdBuffer.Exec(isProtectedMemory?m_vkQueueProtected:m_vkQueue, isProtectedMemory);
         // XXX Should double-buffer the command buffers, for now just flush
         m_cmdBuffer.Wait();
     }
@@ -2480,6 +2602,8 @@ namespace Conformance
         VulkanSwapchainImageData* swapchainData;
         uint32_t imageIndex;
         bool multiview_enable = GetGlobalData().IsUsingMultiview();
+        bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+        VkCommandBuffer buf = isProtectedMemory?m_cmdBuffer.bufP:m_cmdBuffer.buf;
         (nextPrevLayerView);
 
         ALOGE("%s:xxxxxx:%d", __func__, isMotionVectorPass);
@@ -2490,7 +2614,7 @@ namespace Conformance
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(colorSwapchainImage);
 
         m_cmdBuffer.Clear();
-        m_cmdBuffer.Begin();
+        m_cmdBuffer.Begin(isProtectedMemory);
 
         CHECKPOINT();
 
@@ -2511,12 +2635,12 @@ namespace Conformance
 
         swapchainData->BindRenderTarget(imageIndex, imageArrayIndex, renderArea, secondAttachmentAspect, &renderPassBeginInfo);
 
-        vkCmdBeginRenderPass(m_cmdBuffer.buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdBeginRenderPass(buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
 
         CHECKPOINT();
         ALOGE("%s:xxxxxx::1", __func__);
 
-        swapchainData->BindPipeline(m_cmdBuffer.buf, imageArrayIndex);
+        swapchainData->BindPipeline(buf, imageArrayIndex);
 
         CHECKPOINT();
 
@@ -2576,18 +2700,18 @@ namespace Conformance
                 XrMatrix4x4f vp = proj * view;
                 MeshHandle lastMeshHandle;
 
-                const auto drawMesh = [this, &vp, &lastMeshHandle](const MeshDrawable mesh) {
+                const auto drawMesh = [this, &vp, &lastMeshHandle, &buf](const MeshDrawable mesh) {
                     VulkanMesh& vkMesh = m_meshes[mesh.handle];
                     if (mesh.handle != lastMeshHandle) {
                         // We are now rendering a new mesh
 
                         // Bind index and vertex buffers
-                        vkCmdBindIndexBuffer(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.idx.buf, 0, VK_INDEX_TYPE_UINT16);
+                        vkCmdBindIndexBuffer(buf, vkMesh.m_DrawBuffer.idx.buf, 0, VK_INDEX_TYPE_UINT16);
 
                         CHECKPOINT();
 
                         VkDeviceSize offset = 0;
-                        vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &vkMesh.m_DrawBuffer.vtx.buf, &offset);
+                        vkCmdBindVertexBuffers(buf, 0, 1, &vkMesh.m_DrawBuffer.vtx.buf, &offset);
 
                         CHECKPOINT();
                         lastMeshHandle = mesh.handle;
@@ -2601,12 +2725,12 @@ namespace Conformance
                     ubuf.tintColor = mesh.tintColor;
                     ubuf.mvp = vp * model;
                     ubuf.alpha.x = mesh.alpha;
-                    vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
+                    vkCmdPushConstants(buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
 
                     CHECKPOINT();
 
                     // Draw the mesh.
-                    vkCmdDrawIndexed(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.count.idx, 1, 0, 0, 0);
+                    vkCmdDrawIndexed(buf, vkMesh.m_DrawBuffer.count.idx, 1, 0, 0, 0);
 
                     CHECKPOINT();
                 };
@@ -2658,18 +2782,18 @@ namespace Conformance
                 XrMatrix4x4f_Multiply(&vp[1], &proj[1], &view[1]);
                 MeshHandle lastMeshHandle;
 
-                const auto drawMesh = [this, &vp, &lastMeshHandle, &edo_enalble, &edoParams, &ubo, &uboBuffer, &uboData, &depthView, &defaultSampler, &size, &bufferCreateInfo](const MeshDrawable mesh) {
+                const auto drawMesh = [this, &vp, &lastMeshHandle, &edo_enalble, &edoParams, &ubo, &uboBuffer, &uboData, &depthView, &defaultSampler, &size, &bufferCreateInfo, &buf](const MeshDrawable mesh) {
                     VulkanMesh& vkMesh = m_meshes[mesh.handle];
                     if (mesh.handle != lastMeshHandle) {
                         // We are now rendering a new mesh
 
                         // Bind index and vertex buffers
-                        vkCmdBindIndexBuffer(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.idx.buf, 0, VK_INDEX_TYPE_UINT16);
+                        vkCmdBindIndexBuffer(buf, vkMesh.m_DrawBuffer.idx.buf, 0, VK_INDEX_TYPE_UINT16);
 
                         CHECKPOINT();
 
                         VkDeviceSize offset = 0;
-                        vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &vkMesh.m_DrawBuffer.vtx.buf, &offset);
+                        vkCmdBindVertexBuffers(buf, 0, 1, &vkMesh.m_DrawBuffer.vtx.buf, &offset);
 
                         CHECKPOINT();
                         lastMeshHandle = mesh.handle;
@@ -2717,7 +2841,7 @@ namespace Conformance
                         vkUpdateDescriptorSets(m_vkDevice, (uint32_t)ArraySize(writeDescriptorSets), writeDescriptorSets, 0, NULL);
 
                         vkCmdBindDescriptorSets(
-                            m_cmdBuffer.buf,
+                            buf,
                             VK_PIPELINE_BIND_POINT_GRAPHICS,
                             m_pipelineLayout.layout,     
                             0,                  
@@ -2742,12 +2866,12 @@ namespace Conformance
                     ubuf.p0  = mvp[1];
                     ubuf.p1  = model;
                     ubuf.alpha.x = mesh.alpha;
-                    vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
+                    vkCmdPushConstants(buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBuffer), &ubuf);
 
                     CHECKPOINT();
 
                     // Draw the mesh.
-                    vkCmdDrawIndexed(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.count.idx, 1, 0, 0, 0);
+                    vkCmdDrawIndexed(buf, vkMesh.m_DrawBuffer.count.idx, 1, 0, 0, 0);
 
                     CHECKPOINT();
                 };
@@ -2778,18 +2902,19 @@ namespace Conformance
             XrMatrix4x4f viewPrev = Matrix::InvertRigidBody(toViewPrev);
             XrMatrix4x4f vpPrev = projPrev * viewPrev;
 
-            const auto drawMesh = [this, &vp, &vpPrev, &lastMeshHandle](const MeshDrawable mesh) {
+            const auto drawMesh = [this, &vp, &vpPrev, &lastMeshHandle, &buf](const MeshDrawable mesh) {
                 VulkanMesh& vkMesh = m_meshes[mesh.handle];
                 if (mesh.handle != lastMeshHandle) {
                     // We are now rendering a new mesh
 
                     // Bind index and vertex buffers
-                    vkCmdBindIndexBuffer(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.idx.buf, 0, VK_INDEX_TYPE_UINT16);
+                    vkCmdBindIndexBuffer(buf, vkMesh.m_DrawBuffer.idx.buf, 0, VK_INDEX_TYPE_UINT16);
 
                     CHECKPOINT();
 
                     VkDeviceSize offset = 0;
-                    vkCmdBindVertexBuffers(m_cmdBuffer.buf, 0, 1, &vkMesh.m_DrawBuffer.vtx.buf, &offset);
+                    vkCmdBindVertexBuffers(buf, 0, 1, &vkMesh.m_DrawBuffer.vtx.buf, &offset);
+
 
                     CHECKPOINT();
                     lastMeshHandle = mesh.handle;
@@ -2809,12 +2934,12 @@ namespace Conformance
                 ubuf.prevModel = modelPrev;
                 //#endif
 
-                vkCmdPushConstants(m_cmdBuffer.buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBufferMV), &ubuf);
+                vkCmdPushConstants(buf, m_pipelineLayout.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(VulkanUniformBufferMV), &ubuf);
 
                 CHECKPOINT();
 
                 // Draw the mesh.
-                vkCmdDrawIndexed(m_cmdBuffer.buf, vkMesh.m_DrawBuffer.count.idx, 1, 0, 0, 0);
+                vkCmdDrawIndexed(buf, vkMesh.m_DrawBuffer.count.idx, 1, 0, 0, 0);
 
                 CHECKPOINT();
             };
@@ -2831,14 +2956,15 @@ namespace Conformance
 
         }
 
-        vkCmdEndRenderPass(m_cmdBuffer.buf);
+        vkCmdEndRenderPass(buf);
 
         CHECKPOINT();
 
-        m_pbrResources->SubmitFrameResources(m_vkQueue);
+        VkQueue queue = isProtectedMemory?m_vkQueueProtected:m_vkQueue;
+        m_pbrResources->SubmitFrameResources(queue);
 
-        m_cmdBuffer.End();
-        m_cmdBuffer.Exec(m_vkQueue);
+        m_cmdBuffer.End(isProtectedMemory);
+        m_cmdBuffer.Exec(queue, isProtectedMemory);
         // XXX Should double-buffer the command buffers, for now just flush
         m_cmdBuffer.Wait();
 
@@ -2853,7 +2979,7 @@ namespace Conformance
         // Cycle the window's swapchain on the last view rendered
         if (swapchainData == &m_swapchainImageData.back()) {
             m_swapchain.Acquire();
-            m_swapchain.Present(m_vkQueue);
+            m_swapchain.Present(queue);
         }
 #endif
     }
@@ -2863,6 +2989,8 @@ namespace Conformance
     {
         (void)colorSwapchainImage;
         (void)color;
+        bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+        VkCommandBuffer buf = isProtectedMemory?m_cmdBuffer.bufP:m_cmdBuffer.buf;
 
         VulkanSwapchainImageData* swapchainData;
         uint32_t imageIndex;
@@ -2870,7 +2998,7 @@ namespace Conformance
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(colorSwapchainImage);
 
         m_cmdBuffer.Clear();
-        m_cmdBuffer.Begin();
+        m_cmdBuffer.Begin(isProtectedMemory);
 
         CHECKPOINT();
 
@@ -2935,7 +3063,7 @@ namespace Conformance
             imgBarrier.dstQueueFamilyIndex = m_queueFamilyIndex;
             imgBarrier.image = swapchainData->GetTypedImage(imageIndex).image;
             imgBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-            vkCmdPipelineBarrier(m_cmdBuffer.buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
+            vkCmdPipelineBarrier(buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
                                  1, &imgBarrier);
         }
 
@@ -2975,9 +3103,9 @@ namespace Conformance
             vkUpdateDescriptorSets(m_vkDevice, (uint32_t)ArraySize(writeDescriptorSets), writeDescriptorSets, 0, NULL);
         }
 
-        swapchainData->BindPipeline(m_cmdBuffer.buf, imageArrayIndex, SHADER_PROGRAM_TYPE_COMPUTE);
+        swapchainData->BindPipeline(buf, imageArrayIndex, SHADER_PROGRAM_TYPE_COMPUTE);
 
-        vkCmdBindDescriptorSets(m_cmdBuffer.buf, VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelineLayout.layout, 0, 1,
+        vkCmdBindDescriptorSets(buf, VK_PIPELINE_BIND_POINT_COMPUTE, m_computePipelineLayout.layout, 0, 1,
                                 &m_ComputeDescriptorSet, 0, NULL);
 
         CHECKPOINT();
@@ -2985,7 +3113,7 @@ namespace Conformance
         uint32_t widthDiv = (r.extent.width + 15) / 16;
         uint32_t heightDiv = (r.extent.height + 15) / 16;
 
-        vkCmdDispatch(m_cmdBuffer.buf, widthDiv, heightDiv, 1);
+        vkCmdDispatch(buf, widthDiv, heightDiv, 1);
 
         CHECKPOINT();
 
@@ -3009,14 +3137,15 @@ namespace Conformance
             imgBarrier.dstQueueFamilyIndex = m_queueFamilyIndex;
             imgBarrier.image = swapchainData->GetTypedImage(imageIndex).image;
             imgBarrier.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
-            vkCmdPipelineBarrier(m_cmdBuffer.buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
+            vkCmdPipelineBarrier(buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0, nullptr,
                                  1, &imgBarrier);
         }
 
         CHECKPOINT();
 
-        m_cmdBuffer.End();
-        m_cmdBuffer.Exec(m_vkQueue);
+        VkQueue queue = isProtectedMemory?m_vkQueueProtected:m_vkQueue;
+        m_cmdBuffer.End(isProtectedMemory);
+        m_cmdBuffer.Exec(queue, isProtectedMemory);
         // XXX Should double-buffer the command buffers, for now just flush
         m_cmdBuffer.Wait();
 

@@ -1555,6 +1555,8 @@ namespace Conformance
             SKIP(XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME " not supported");
         }
 
+        globalData.SetProtectedMemory(true);
+
         CompositionHelper compositionHelper(
             "Projection Depth", {XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME, XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME});
         InteractiveLayerManager interactiveLayerManager(compositionHelper, "projection_depth.png",
@@ -1606,7 +1608,13 @@ namespace Conformance
             const_cast<const void*&>(projLayers[layer]->next) = &depthTestInfo[layer];
 
             depthInfo[layer].resize(projLayers[layer]->viewCount);
-            for (uint32_t j = 0; j < projLayers[layer]->viewCount; j++) {
+            for (uint32_t j = 0; j < projLayers[layer]->viewCount; j++) { 
+                bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+
+                if(isProtectedMemory){
+                    colorSwapchainCreateInfo[j].createFlags |= XR_SWAPCHAIN_CREATE_PROTECTED_CONTENT_BIT;
+                    depthSwapchainCreateInfo[j].createFlags |= XR_SWAPCHAIN_CREATE_PROTECTED_CONTENT_BIT;
+                }
                 // create color and depth swapchains
                 swapchain[layer].push_back(
                     compositionHelper.CreateSwapchainWithDepth(colorSwapchainCreateInfo[j], depthSwapchainCreateInfo[j]));

@@ -498,6 +498,11 @@ namespace Conformance
         return isUsingEnvDepthOcclusion;
     }
 
+    bool GlobalData::IsProtectedMemory() const
+    {
+        return isProtectedMemory;
+    }
+
     void GlobalData::PushSwapchainFormat(int64_t format, const std::string& name)
     {
         std::unique_lock<std::recursive_mutex> lock(dataMutex);

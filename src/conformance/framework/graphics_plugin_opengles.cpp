@@ -457,6 +457,8 @@ namespace Conformance
         bool deviceInitialized{false};
 
         ksGpuWindow window{};
+        ksGpuWindow windowP{};
+        bool isProtectedContext = false;
 
         XrGraphicsBindingOpenGLESAndroidKHR graphicsBinding = {XR_TYPE_GRAPHICS_BINDING_OPENGL_ES_ANDROID_KHR};
 
@@ -593,6 +595,7 @@ namespace Conformance
     bool OpenGLESGraphicsPlugin::InitializeDevice(XrInstance instance, XrSystemId systemId, bool checkGraphicsRequirements,
                                                   uint32_t /*deviceCreationFlags*/)
     {
+        bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
         XrGraphicsRequirementsOpenGLESKHR graphicsRequirements = {XR_TYPE_GRAPHICS_REQUIREMENTS_OPENGL_ES_KHR, nullptr,
                                                                   XR_MAKE_VERSION(3, 1, 0), XR_MAKE_VERSION(3, 2, 0)};
 
@@ -626,9 +629,26 @@ namespace Conformance
         ksGpuSurfaceColorFormat colorFormat{KS_GPU_SURFACE_COLOR_FORMAT_B8G8R8A8};
         ksGpuSurfaceDepthFormat depthFormat{KS_GPU_SURFACE_DEPTH_FORMAT_D24};
         ksGpuSampleCount sampleCount{KS_GPU_SAMPLE_COUNT_1};
-        if (!ksGpuWindow_Create(&window, &driverInstance, &queueInfo, 0, colorFormat, depthFormat, sampleCount, 640, 480, false)) {
+
+        memset(&window, 0, sizeof(ksGpuWindow));
+        memset(&windowP, 0, sizeof(ksGpuWindow));
+
+        ALOGE("%s : 0: isProtectedMemory=%d", __func__, isProtectedMemory);
+        if (!ksGpuWindow_Create(&window, &driverInstance, &queueInfo, 0, colorFormat, depthFormat, sampleCount, 640, 480, false, false)) {
             throw std::runtime_error("Unable to create GL context");
         }
+
+        ALOGE("%s : 1: isProtectedMemory=%d", __func__, isProtectedMemory);
+        windowP.context.scontext = &window.context;
+        if (!ksGpuWindow_Create(&windowP, &driverInstance, &queueInfo, 0, colorFormat, depthFormat, sampleCount, 640, 480, false, true)) {
+            throw std::runtime_error("Unable to create GL context");
+        }
+
+        ALOGE("%s : isProtectedMemory=%d", __func__, isProtectedMemory);
+        if(isProtectedMemory) ksGpuContext_SetCurrent(&windowP.context);
+        else ksGpuContext_SetCurrent(&window.context);
+
+        isProtectedContext = isProtectedMemory;
 
         // Initialize the binding once we have a context
         {
@@ -842,6 +862,7 @@ namespace Conformance
             m_pbrResources.reset();
 
             ksGpuWindow_Destroy(&window);
+            ksGpuWindow_Destroy(&windowP);
         }
         deviceInitialized = false;
     }
@@ -1520,7 +1541,14 @@ namespace Conformance
         uint32_t imageIndex;
         bool msaa_enable = GetGlobalData().IsUsingMSAA();
         bool multiview_enable = GetGlobalData().IsUsingMultiview();
+        bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
         (nextPrevLayerView);
+
+        if(isProtectedContext != isProtectedMemory){
+            if(isProtectedMemory) ksGpuContext_SetCurrent(&windowP.context);
+            else ksGpuContext_SetCurrent(&window.context);
+            isProtectedContext = isProtectedMemory;
+        }
 
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(colorSwapchainImage);
 

@@ -227,6 +227,8 @@ namespace Conformance
         CmdBufferState state{CmdBufferState::Undefined};
         VkCommandPool pool{VK_NULL_HANDLE};
         VkCommandBuffer buf{VK_NULL_HANDLE};
+        VkCommandPool poolP{VK_NULL_HANDLE};
+        VkCommandBuffer bufP{VK_NULL_HANDLE};
         VkFence execFence{VK_NULL_HANDLE};
 
         CmdBuffer() = default;
@@ -246,12 +248,16 @@ namespace Conformance
                 if (pool != VK_NULL_HANDLE) {
                     vkDestroyCommandPool(m_vkDevice, pool, nullptr);
                 }
+                if (poolP != VK_NULL_HANDLE) {
+                    vkDestroyCommandPool(m_vkDevice, poolP, nullptr);
+                }
                 if (execFence != VK_NULL_HANDLE) {
                     vkDestroyFence(m_vkDevice, execFence, nullptr);
                 }
             }
             buf = VK_NULL_HANDLE;
             pool = VK_NULL_HANDLE;
+            poolP = VK_NULL_HANDLE;
             execFence = VK_NULL_HANDLE;
             m_vkDevice = nullptr;
         }
@@ -271,8 +277,18 @@ namespace Conformance
             VkCommandPoolCreateInfo cmdPoolInfo{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
             cmdPoolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
             cmdPoolInfo.queueFamilyIndex = queueFamilyIndex;
+
+            VkCommandPoolCreateInfo createInfo = {
+                .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+                .flags =
+                VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT | VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_PROTECTED_BIT,
+                .queueFamilyIndex = queueFamilyIndex,
+            };
+
             XRC_CHECK_THROW_VKCMD(vkCreateCommandPool(m_vkDevice, &cmdPoolInfo, nullptr, &pool));
             XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_COMMAND_POOL, (uint64_t)pool, "CTS command pool"));
+            XRC_CHECK_THROW_VKCMD(vkCreateCommandPool(m_vkDevice, &createInfo, nullptr, &poolP));
+            XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_COMMAND_POOL, (uint64_t)pool, "CTS command poolP"));
 
             // Create the command buffer from the command pool
             VkCommandBufferAllocateInfo cmd{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
@@ -281,6 +297,9 @@ namespace Conformance
             cmd.commandBufferCount = 1;
             XRC_CHECK_THROW_VKCMD(vkAllocateCommandBuffers(m_vkDevice, &cmd, &buf));
             XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_COMMAND_BUFFER, (uint64_t)buf, "CTS command buffer"));
+            cmd.commandPool = poolP;
+            XRC_CHECK_THROW_VKCMD(vkAllocateCommandBuffers(m_vkDevice, &cmd, &bufP));
+            XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_COMMAND_BUFFER, (uint64_t)bufP, "CTS command bufferP"));
 
             VkFenceCreateInfo fenceInfo{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
             XRC_CHECK_THROW_VKCMD(vkCreateFence(m_vkDevice, &fenceInfo, nullptr, &execFence));
@@ -290,30 +309,40 @@ namespace Conformance
             return true;
         }
 
-        bool Begin()
+        bool Begin(bool isProtected)
         {
             XRC_CHECK_THROW(state == CmdBufferState::Initialized);
             VkCommandBufferBeginInfo cmdBeginInfo{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-            XRC_CHECK_THROW_VKCMD(vkBeginCommandBuffer(buf, &cmdBeginInfo));
+            XRC_CHECK_THROW_VKCMD(vkBeginCommandBuffer(isProtected?bufP:buf, &cmdBeginInfo));
             SetState(CmdBufferState::Recording);
             return true;
         }
 
-        bool End()
+        bool End(bool isProtected)
         {
             XRC_CHECK_THROW(state == CmdBufferState::Recording);
-            XRC_CHECK_THROW_VKCMD(vkEndCommandBuffer(buf));
+            XRC_CHECK_THROW_VKCMD(vkEndCommandBuffer(isProtected?bufP:buf));
             SetState(CmdBufferState::Executable);
             return true;
         }
 
-        bool Exec(VkQueue queue)
+        bool Exec(VkQueue queue, bool protectedSubmit)
         {
             XRC_CHECK_THROW(state == CmdBufferState::Executable);
 
             VkSubmitInfo submitInfo{VK_STRUCTURE_TYPE_SUBMIT_INFO};
             submitInfo.commandBufferCount = 1;
             submitInfo.pCommandBuffers = &buf;
+
+            VkProtectedSubmitInfo protectedSubmitInfo = {};
+            protectedSubmitInfo.sType = VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO;
+            protectedSubmitInfo.protectedSubmit       = true;
+
+            if(protectedSubmit){
+                submitInfo.pCommandBuffers = &bufP;
+                submitInfo.pNext = &protectedSubmitInfo;
+            }
+
             XRC_CHECK_THROW_VKCMD(vkQueueSubmit(queue, 1, &submitInfo, execFence));
 
             SetState(CmdBufferState::Executing);
@@ -350,6 +379,7 @@ namespace Conformance
 
                 XRC_CHECK_THROW_VKCMD(vkResetFences(m_vkDevice, 1, &execFence));
                 XRC_CHECK_THROW_VKCMD(vkResetCommandBuffer(buf, 0));
+                XRC_CHECK_THROW_VKCMD(vkResetCommandBuffer(bufP, 0));
 
                 SetState(CmdBufferState::Initialized);
             }
@@ -1651,7 +1681,7 @@ namespace Conformance
         }
 
         void Allocate(const VulkanDebugObjectNamer& namer, VkDevice device, MemoryAllocator* memAllocator, VkFormat depthFormat,
-                      uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount)
+                      uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount, bool protectedMemory)
         {
             Reset();
 
@@ -1674,10 +1704,17 @@ namespace Conformance
             XRC_CHECK_THROW_VKCMD(vkCreateImage(device, &imageInfo, nullptr, &depthImage));
             XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE, (uint64_t)depthImage, "CTS fallback depth image"));
             m_xrImage.image = depthImage;
+            if(protectedMemory){
+                imageInfo.flags = VK_IMAGE_CREATE_PROTECTED_BIT;
+            }
 
             VkMemoryRequirements memRequirements{};
             vkGetImageMemoryRequirements(device, depthImage, &memRequirements);
-            memAllocator->Allocate(memRequirements, &depthMemory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            if(protectedMemory){
+                memAllocator->Allocate(memRequirements, &depthMemory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT| VK_MEMORY_PROPERTY_PROTECTED_BIT);
+            } else {
+                memAllocator->Allocate(memRequirements, &depthMemory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            }
             XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)depthMemory, "CTS fallback depth image memory"));
             XRC_CHECK_THROW_VKCMD(vkBindImageMemory(device, depthImage, depthMemory, 0));
 
@@ -1775,7 +1812,7 @@ namespace Conformance
         }
 
         void Allocate(const VulkanDebugObjectNamer& namer, VkDevice device, MemoryAllocator* memAllocator, VkFormat colorFormat,
-                      uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount)
+                      uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount, bool protectedMemory)
         {
             Reset();
 
@@ -1798,10 +1835,17 @@ namespace Conformance
             XRC_CHECK_THROW_VKCMD(vkCreateImage(device, &imageInfo, nullptr, &colorImage));
             XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE, (uint64_t)colorImage, "CTS fallback color image"));
             m_xrImage.image = colorImage;
+            if(protectedMemory){
+                imageInfo.flags = VK_IMAGE_CREATE_PROTECTED_BIT;
+            }
 
             VkMemoryRequirements memRequirements{};
             vkGetImageMemoryRequirements(device, colorImage, &memRequirements);
-            memAllocator->Allocate(memRequirements, &colorMemory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            if(protectedMemory){
+                memAllocator->Allocate(memRequirements, &colorMemory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT| VK_MEMORY_PROPERTY_PROTECTED_BIT);
+            } else {
+                memAllocator->Allocate(memRequirements, &colorMemory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+            }
             XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)colorMemory, "CTS fallback color image memory"));
             XRC_CHECK_THROW_VKCMD(vkBindImageMemory(device, colorImage, colorMemory, 0));
 

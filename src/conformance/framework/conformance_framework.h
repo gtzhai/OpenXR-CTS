@@ -325,6 +325,10 @@ namespace Conformance
         bool IsUsingMultiview() const;
         bool IsUsingEnvDepthOcclusion() const;
         bool IsGraphicsPluginVulkan();
+        bool IsProtectedMemory() const;
+        void SetProtectedMemory(bool isProtect) {
+            isProtectedMemory = isProtect;
+        };
     public:
         /// Guards all member data.
         mutable std::recursive_mutex dataMutex;
@@ -397,6 +401,7 @@ namespace Conformance
         bool isUsingMSAA{false};
         bool isUsingMultiView{false};
         bool isUsingEnvDepthOcclusion{false};
+        bool isProtectedMemory{false};
 
     private:
         VersionDependentDataArray versionDependentData;

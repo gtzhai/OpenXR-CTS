@@ -851,8 +851,9 @@ typedef struct ksGpuLimits {
     int maxSamples;
 } ksGpuLimits;
 
-typedef struct {
+typedef struct ksGpuContext{
     const ksGpuDevice *device;
+    struct ksGpuContext *scontext;
 #if defined(OS_WINDOWS)
     HDC hDC;
     HGLRC hGLRC;
@@ -1026,7 +1027,7 @@ typedef struct {
 
 bool ksGpuWindow_Create(ksGpuWindow *window, ksDriverInstance *instance, const ksGpuQueueInfo *queueInfo, int queueIndex,
                         ksGpuSurfaceColorFormat colorFormat, ksGpuSurfaceDepthFormat depthFormat, ksGpuSampleCount sampleCount,
-                        int width, int height, bool fullscreen);
+                        int width, int height, bool fullscreen, bool protect);
 void ksGpuWindow_Destroy(ksGpuWindow *window);
 
 #ifdef __cplusplus

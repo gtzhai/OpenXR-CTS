@@ -576,7 +576,7 @@ namespace Conformance
         ksGpuSurfaceColorFormat colorFormat{KS_GPU_SURFACE_COLOR_FORMAT_B8G8R8A8};
         ksGpuSurfaceDepthFormat depthFormat{KS_GPU_SURFACE_DEPTH_FORMAT_D24};
         ksGpuSampleCount sampleCount{KS_GPU_SAMPLE_COUNT_1};
-        if (!ksGpuWindow_Create(&window, &driverInstance, &queueInfo, 0, colorFormat, depthFormat, sampleCount, 640, 480, false)) {
+        if (!ksGpuWindow_Create(&window, &driverInstance, &queueInfo, 0, colorFormat, depthFormat, sampleCount, 640, 480, false, false)) {
             XRC_THROW("Unable to create GL context");
         }
         //ReportF("Created window");
