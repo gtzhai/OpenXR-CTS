@@ -2613,37 +2613,6 @@ namespace Conformance
 
         std::tie(swapchainData, imageIndex) = m_swapchainImageDataMap.GetDataAndIndexFromBasePointer(colorSwapchainImage);
 
-        m_cmdBuffer.Clear();
-        m_cmdBuffer.Begin(isProtectedMemory);
-
-        CHECKPOINT();
-
-        const XrRect2Di& r = layerView.subImage.imageRect;
-        VkRect2D renderArea = {{r.offset.x, r.offset.y}, {uint32_t(r.extent.width), uint32_t(r.extent.height)}};
-        SetViewportAndScissor(renderArea);
-
-        // may be depth, stencil, or both
-        int64_t secondImageFormat = swapchainData->GetDepthFormat();
-        const SwapchainFormatData& secondFormatData = FindFormatData(secondImageFormat);
-        VkImageAspectFlags secondAttachmentAspect = ComputeAspectFlags(secondFormatData);
-
-        // Just bind the eye render target, ClearImageSlice will have cleared it.
-        VkRenderPassBeginInfo renderPassBeginInfo{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
-
-        // aka slice
-        auto imageArrayIndex = layerView.subImage.imageArrayIndex;
-
-        swapchainData->BindRenderTarget(imageIndex, imageArrayIndex, renderArea, secondAttachmentAspect, &renderPassBeginInfo);
-
-        vkCmdBeginRenderPass(buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-        CHECKPOINT();
-        ALOGE("%s:xxxxxx::1", __func__);
-
-        swapchainData->BindPipeline(buf, imageArrayIndex);
-
-        CHECKPOINT();
-
         bool edo_enalble      = GetGlobalData().IsUsingEnvDepthOcclusion();
         struct
         {
@@ -2683,7 +2652,77 @@ namespace Conformance
             XRC_CHECK_THROW_VKCMD(vkCreateImageView(m_vkDevice, &depthViewInfo, nullptr, &depthView));
             ALOGE("%s:xxxxxx::2.3:%p", __func__, depthView);
             XRC_CHECK_THROW_VKCMD(m_namer.SetName(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)depthView, "CTS env depth image view"));
+
+            ubo.vp[0] = edoParams->depthViewProj[0];
+            ubo.vp[1] = edoParams->depthViewProj[1];
+            ubo.vp[0].m[0] = 1.0f;
+            ubo.vp[1].m[0] = 1.0f;
+            uboBuffer.Update<uint8_t>(m_vkDevice, {uboData, static_cast<size_t>(bufferCreateInfo.size)}, 0);
+
+            VkImageView depthImageView = depthView;
+            VkImageLayout depthImageLayout = VK_IMAGE_LAYOUT_GENERAL;
+            uint32_t depthImageBinding = 0;
+            uint32_t uboBinding = 1;
+
+            VkDescriptorImageInfo depthImageInfo;
+            depthImageInfo.imageLayout = depthImageLayout;
+            depthImageInfo.imageView = depthImageView;
+            depthImageInfo.sampler = defaultSampler->get();
+
+            VkDescriptorBufferInfo uboInfo;
+            uboInfo.buffer = uboBuffer.buf;
+            uboInfo.offset = 0;
+            uboInfo.range = VK_WHOLE_SIZE;
+
+            VkWriteDescriptorSet writeDescriptorSets[2]{};
+            writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptorSets[0].dstSet = m_gfxDescriptorSet;
+            writeDescriptorSets[0].dstBinding = depthImageBinding;
+            writeDescriptorSets[0].descriptorCount = 1;
+            writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;//VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            writeDescriptorSets[0].pImageInfo = &depthImageInfo;
+
+            writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            writeDescriptorSets[1].dstSet = m_gfxDescriptorSet;
+            writeDescriptorSets[1].dstBinding = uboBinding;
+            writeDescriptorSets[1].descriptorCount = 1;
+            writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            writeDescriptorSets[1].pBufferInfo = &uboInfo;
+
+            vkUpdateDescriptorSets(m_vkDevice, (uint32_t)ArraySize(writeDescriptorSets), writeDescriptorSets, 0, NULL);
         }
+
+        m_cmdBuffer.Clear();
+        m_cmdBuffer.Begin(isProtectedMemory);
+
+        CHECKPOINT();
+
+        const XrRect2Di& r = layerView.subImage.imageRect;
+        VkRect2D renderArea = {{r.offset.x, r.offset.y}, {uint32_t(r.extent.width), uint32_t(r.extent.height)}};
+        SetViewportAndScissor(renderArea);
+
+        // may be depth, stencil, or both
+        int64_t secondImageFormat = swapchainData->GetDepthFormat();
+        const SwapchainFormatData& secondFormatData = FindFormatData(secondImageFormat);
+        VkImageAspectFlags secondAttachmentAspect = ComputeAspectFlags(secondFormatData);
+
+        // Just bind the eye render target, ClearImageSlice will have cleared it.
+        VkRenderPassBeginInfo renderPassBeginInfo{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};
+
+        // aka slice
+        auto imageArrayIndex = layerView.subImage.imageArrayIndex;
+
+        swapchainData->BindRenderTarget(imageIndex, imageArrayIndex, renderArea, secondAttachmentAspect, &renderPassBeginInfo);
+
+        vkCmdBeginRenderPass(buf, &renderPassBeginInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        CHECKPOINT();
+        ALOGE("%s:xxxxxx::1", __func__);
+
+        swapchainData->BindPipeline(buf, imageArrayIndex);
+
+        CHECKPOINT();
+
 
         ALOGE("%s:xxxxxx::3", __func__);
         CHECKPOINT();
@@ -2802,44 +2841,6 @@ namespace Conformance
                     ALOGE("%s:xxxxxx::4", __func__);
                     if(edo_enalble)
                     {
-                        ubo.vp[0] = edoParams->depthViewProj[0];
-                        ubo.vp[1] = edoParams->depthViewProj[1];
-                        ubo.vp[0].m[0] = 1.0f;
-                        ubo.vp[1].m[0] = 1.0f;
-                        uboBuffer.Update<uint8_t>(m_vkDevice, {uboData, static_cast<size_t>(bufferCreateInfo.size)}, 0);
-
-                        VkImageView depthImageView = depthView;
-                        VkImageLayout depthImageLayout = VK_IMAGE_LAYOUT_GENERAL;
-                        uint32_t depthImageBinding = 0;
-                        uint32_t uboBinding = 1;
-
-                        VkDescriptorImageInfo depthImageInfo;
-                        depthImageInfo.imageLayout = depthImageLayout;
-                        depthImageInfo.imageView = depthImageView;
-                        depthImageInfo.sampler = defaultSampler->get();
-
-                        VkDescriptorBufferInfo uboInfo;
-                        uboInfo.buffer = uboBuffer.buf;
-                        uboInfo.offset = 0;
-                        uboInfo.range = VK_WHOLE_SIZE;
-
-                        VkWriteDescriptorSet writeDescriptorSets[2]{};
-                        writeDescriptorSets[0].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        writeDescriptorSets[0].dstSet = m_gfxDescriptorSet;
-                        writeDescriptorSets[0].dstBinding = depthImageBinding;
-                        writeDescriptorSets[0].descriptorCount = 1;
-                        writeDescriptorSets[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;//VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-                        writeDescriptorSets[0].pImageInfo = &depthImageInfo;
-
-                        writeDescriptorSets[1].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-                        writeDescriptorSets[1].dstSet = m_gfxDescriptorSet;
-                        writeDescriptorSets[1].dstBinding = uboBinding;
-                        writeDescriptorSets[1].descriptorCount = 1;
-                        writeDescriptorSets[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-                        writeDescriptorSets[1].pBufferInfo = &uboInfo;
-
-                        vkUpdateDescriptorSets(m_vkDevice, (uint32_t)ArraySize(writeDescriptorSets), writeDescriptorSets, 0, NULL);
-
                         vkCmdBindDescriptorSets(
                             buf,
                             VK_PIPELINE_BIND_POINT_GRAPHICS,

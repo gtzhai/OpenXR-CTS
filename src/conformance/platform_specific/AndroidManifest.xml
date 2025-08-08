@@ -27,6 +27,7 @@
     <!-- If building externally with the OpenXR loader AAR, this would be merged in automatically. -->
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR" />
     <uses-permission android:name="org.khronos.openxr.permission.OPENXR_SYSTEM" />
+    <uses-permission android:name="com.picovr.permission.SPATIAL_DATA" />
     <uses-feature
         android:name="com.oculus.feature.PASSTHROUGH"
         android:required="true"

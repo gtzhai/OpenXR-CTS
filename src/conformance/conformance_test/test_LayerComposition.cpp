@@ -1555,7 +1555,7 @@ namespace Conformance
             SKIP(XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME " not supported");
         }
 
-        globalData.SetProtectedMemory(true);
+        //globalData.SetProtectedMemory(true);
 
         CompositionHelper compositionHelper(
             "Projection Depth", {XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME, XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME});

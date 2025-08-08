@@ -221,7 +221,7 @@ namespace Conformance
       else {
         outColor = vec4(0.0f, 0.0f, 0.0f, 0.0f); // invisible
       }
-      outColor = vec4(depthViewEyeZ, depthViewEyeZ, depthViewEyeZ, 1.0f); // invisible
+      //outColor = vec4(depthViewEyeZ, depthViewEyeZ, depthViewEyeZ, 1.0f); // invisible
   
       gl_FragDepth = cubeDepth;
     }

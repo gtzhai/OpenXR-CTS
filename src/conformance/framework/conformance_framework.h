@@ -329,6 +329,19 @@ namespace Conformance
         void SetProtectedMemory(bool isProtect) {
             isProtectedMemory = isProtect;
         };
+
+        void SetUsingMultiview(bool multiview) {
+            isUsingMultiView = multiview;
+        };
+
+        void SetUsingEnvDepthOcclusion(bool envDepthOcclusion) {
+            isUsingEnvDepthOcclusion = envDepthOcclusion;
+        };
+
+        void SetUsingMSAA(bool msaa) {
+            isUsingMSAA = msaa;
+        };
+
     public:
         /// Guards all member data.
         mutable std::recursive_mutex dataMutex;

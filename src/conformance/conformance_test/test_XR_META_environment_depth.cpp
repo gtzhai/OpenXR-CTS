@@ -224,7 +224,12 @@ namespace Conformance
         }
 
 
-        XRC_CHECK_THROW_XRCMD(xrAcquireEnvironmentDepthImageMETA(environment_depth_provider_, acquireInfo, environmentDepthImage));
+        //XRC_CHECK_THROW_XRCMD(xrAcquireEnvironmentDepthImageMETA(environment_depth_provider_, acquireInfo, environmentDepthImage));
+        int ret = (xrAcquireEnvironmentDepthImageMETA(environment_depth_provider_, acquireInfo, environmentDepthImage));
+        if (ret != XR_SUCCESS) {
+            ALOGE("%s::%s failed for xrAcquireEnvironmentDepthImageMETA: %d", module, __FUNCTION__, ret);
+            return -1;
+        }
         return 0;
     }
 
@@ -249,6 +254,10 @@ namespace Conformance
     {
         ALOGE("Test Case:EnvironmentDepth");
         GlobalData& globalData = GetGlobalData();
+
+        globalData.SetUsingMultiview(true);
+        globalData.SetUsingEnvDepthOcclusion(true);
+
         if (!globalData.IsUsingGraphicsPlugin()) {
             SKIP("Cannot test without a graphics plugin");
         }
@@ -282,21 +291,11 @@ namespace Conformance
 
         std::vector<XrSwapchainCreateInfo> colorSwapchainCreateInfo;
         std::vector<XrSwapchainCreateInfo> depthSwapchainCreateInfo;
-        bool isUsingMultiView = globalData.IsUsingMultiview();
 
-        if(!isUsingMultiView){
-            for (auto& view : viewProperties) {
-                colorSwapchainCreateInfo.push_back(
-                    compositionHelper.DefaultColorSwapchainCreateInfo(view.recommendedImageRectWidth, view.recommendedImageRectHeight));
-                depthSwapchainCreateInfo.push_back(
-                    compositionHelper.DefaultDepthSwapchainCreateInfo(view.recommendedImageRectWidth, view.recommendedImageRectHeight));
-            }
-        } else {
-            colorSwapchainCreateInfo.push_back(
-                    compositionHelper.DefaultColorSwapchainCreateInfo(viewProperties[0].recommendedImageRectWidth, viewProperties[0].recommendedImageRectHeight, 0, -1, 2));
-            depthSwapchainCreateInfo.push_back(
-                    compositionHelper.DefaultDepthSwapchainCreateInfo(viewProperties[0].recommendedImageRectWidth, viewProperties[0].recommendedImageRectHeight, 0, -1, 2));
-        }
+        colorSwapchainCreateInfo.push_back(
+                compositionHelper.DefaultColorSwapchainCreateInfo(viewProperties[0].recommendedImageRectWidth, viewProperties[0].recommendedImageRectHeight, 0, -1, 2));
+        depthSwapchainCreateInfo.push_back(
+                compositionHelper.DefaultDepthSwapchainCreateInfo(viewProperties[0].recommendedImageRectWidth, viewProperties[0].recommendedImageRectHeight, 0, -1, 2));
 
         XrInstance instance = compositionHelper.GetInstance();
 
@@ -396,22 +395,12 @@ namespace Conformance
             projLayers[layer] = compositionHelper.CreateProjectionLayer(localSpace);
             projLayers[layer]->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT | XR_COMPOSITION_LAYER_UNPREMULTIPLIED_ALPHA_BIT;
 
-            if(!isUsingMultiView){
-                for (uint32_t j = 0; j < projLayers[layer]->viewCount; j++) {
-                    // create color and depth swapchains
-                    swapchain[layer].push_back(
-                        compositionHelper.CreateSwapchainWithDepth(colorSwapchainCreateInfo[j], depthSwapchainCreateInfo[j]));
-                    const_cast<XrSwapchainSubImage&>(projLayers[layer]->views[j].subImage) =
-                        compositionHelper.MakeDefaultSubImage(swapchain[layer][j].first);
-                }
-            } else {
-                swapchain[layer].push_back(
-                        compositionHelper.CreateSwapchainWithDepth(colorSwapchainCreateInfo[0], depthSwapchainCreateInfo[0]));
-                const_cast<XrSwapchainSubImage&>(projLayers[layer]->views[0].subImage) =
-                        compositionHelper.MakeDefaultSubImage(swapchain[layer][0].first);
-                const_cast<XrSwapchainSubImage&>(projLayers[layer]->views[1].subImage) =
-                        compositionHelper.MakeDefaultSubImage(swapchain[layer][0].first);
-            }
+            swapchain[layer].push_back(
+                    compositionHelper.CreateSwapchainWithDepth(colorSwapchainCreateInfo[0], depthSwapchainCreateInfo[0]));
+            const_cast<XrSwapchainSubImage&>(projLayers[layer]->views[0].subImage) =
+                    compositionHelper.MakeDefaultSubImage(swapchain[layer][0].first);
+            const_cast<XrSwapchainSubImage&>(projLayers[layer]->views[1].subImage) =
+                    compositionHelper.MakeDefaultSubImage(swapchain[layer][0].first);
         }
 
         ALOGE("xxxxxx:Env Depth Cases:");
@@ -491,41 +480,27 @@ namespace Conformance
 
             std::vector<XrCompositionLayerBaseHeader*> layers;
             layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(&passthrough_layer));
-            if (viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT &&
-                viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) {
+            ALOGE("depth buffer %d", env_depth_acq_result_.valid);
+            if (env_depth_acq_result_.valid && (viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT &&
+                viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT)) {
                 const auto& views = std::get<std::vector<XrView>>(viewData);
 
                 for (int layer = 0; layer < LayerCount; layer++) {
-                    if(!isUsingMultiView){
-                        for (size_t j = 0; j < views.size(); j++) {
-                            // Render into each view's swapchain using the projection layer view fov and pose.
-                            compositionHelper.AcquireWaitReleaseImage(
-                                swapchain[layer][j].first, [&](const XrSwapchainImageBaseHeader* swapchainImage) {
-                                    GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage, 0, {0.0f, 0.0f, 0.0f, 0.0f});
+                    EnvDepthOcclusionParams edoParams(depthViewProj[0], depthViewProj[1], depthTex);
+                    compositionHelper.AcquireWaitReleaseImage(
+                        swapchain[layer][0].first, [&](const XrSwapchainImageBaseHeader* swapchainImage) {
+                            GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage, 0, {0.0f, 0.0f, 0.0f, 0.0f});
 
-                                    const_cast<XrFovf&>(projLayers[layer]->views[j].fov) = views[j].fov;
-                                    const_cast<XrPosef&>(projLayers[layer]->views[j].pose) = views[j].pose;
-                                    GetGlobalData().graphicsPlugin->RenderView(projLayers[layer]->views[j], swapchainImage,
-                                                                            RenderParams().Draw(cubes[layer]));
-                                });
-                        }
-                    } else {
-                        EnvDepthOcclusionParams edoParams(depthViewProj[0], depthViewProj[1], depthTex);
-                        compositionHelper.AcquireWaitReleaseImage(
-                            swapchain[layer][0].first, [&](const XrSwapchainImageBaseHeader* swapchainImage) {
-                                GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage, 0, {0.0f, 0.0f, 0.0f, 0.0f});
-
-                                for (size_t j = 0; j < views.size(); j++) {
-                                    const_cast<XrFovf&>(projLayers[layer]->views[j].fov) = views[j].fov;
-                                    const_cast<XrPosef&>(projLayers[layer]->views[j].pose) = views[j].pose;
-                                    const_cast<uint32_t&>(projLayers[layer]->views[j].subImage.imageArrayIndex) = j;
-                                }
-                                GetGlobalData().graphicsPlugin->RenderView(projLayers[layer]->views[0], swapchainImage,
-                                                                        RenderParams().Draw(cubes[layer]), false, nullptr, 
-                                                                        &projLayers[layer]->views[1], nullptr,
-                                                                        &edoParams);
-                            });
-                    }
+                            for (size_t j = 0; j < views.size(); j++) {
+                                const_cast<XrFovf&>(projLayers[layer]->views[j].fov) = views[j].fov;
+                                const_cast<XrPosef&>(projLayers[layer]->views[j].pose) = views[j].pose;
+                                const_cast<uint32_t&>(projLayers[layer]->views[j].subImage.imageArrayIndex) = j;
+                            }
+                            GetGlobalData().graphicsPlugin->RenderView(projLayers[layer]->views[0], swapchainImage,
+                                                                    RenderParams().Draw(cubes[layer]), false, nullptr, 
+                                                                    &projLayers[layer]->views[1], nullptr,
+                                                                    &edoParams);
+                        });
                     layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(projLayers[layer]));
                 }
             }
