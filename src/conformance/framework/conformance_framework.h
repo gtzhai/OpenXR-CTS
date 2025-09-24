@@ -306,6 +306,9 @@ namespace Conformance
         /// Returns true if a graphics plugin was supplied, or if IsGraphicsPluginRequired() is true.
         bool IsUsingGraphicsPlugin() const;
 
+        bool IsGraphicsPluginVulkan() const;
+        bool IsGraphicsPluginGlES() const;
+
         /// Returns true if using XR_EXT_conformance_automation
         bool IsUsingConformanceAutomation() const;
 

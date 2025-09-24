@@ -849,12 +849,13 @@ namespace Conformance
     {
         VkFormat colorFmt{};
         VkFormat depthFmt{};
+        VkFormat fdmFmt{};
         VkSampleCountFlagBits sampleCount{};
         VkRenderPass pass{VK_NULL_HANDLE};
 
         RenderPass() = default;
 
-        bool Create(const VulkanDebugObjectNamer& namer, VkDevice device, VkFormat aColorFmt, VkFormat aDepthFmt,
+        bool Create(const VulkanDebugObjectNamer& namer, VkDevice device, VkFormat aColorFmt, VkFormat aDepthFmt,  VkFormat aFdmFmt,
                     VkSampleCountFlagBits aSampleCount, bool msaa_enable, bool multiview_enable)
         {
             bool usingRP2 = false;
@@ -863,6 +864,7 @@ namespace Conformance
             m_vkDevice = device;
             colorFmt = aColorFmt;
             depthFmt = aDepthFmt;
+            fdmFmt = aFdmFmt;
             sampleCount = aSampleCount;
 
             VkSubpassDescription subpass = {};
@@ -870,7 +872,8 @@ namespace Conformance
 
             VkAttachmentReference colorRef = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
             VkAttachmentReference depthRef = {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};
-            std::array<VkAttachmentDescription, 2> at = {};
+            VkAttachmentReference fdmRef   = {2, VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT};
+            std::array<VkAttachmentDescription, 3> at = {};
 
             VkRenderPassCreateInfo rpInfo{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
             rpInfo.attachmentCount = 0;
@@ -909,6 +912,26 @@ namespace Conformance
                 subpass.pDepthStencilAttachment = &depthRef;
             }
 
+            VkRenderPassFragmentDensityMapCreateInfoEXT renderPassCreationFdmExt = {
+			    VK_STRUCTURE_TYPE_RENDER_PASS_FRAGMENT_DENSITY_MAP_CREATE_INFO_EXT
+	        };
+            if (fdmFmt != VK_FORMAT_UNDEFINED) {
+                fdmRef.attachment = rpInfo.attachmentCount++;
+
+                at[fdmRef.attachment].format = fdmFmt;
+                at[fdmRef.attachment].samples = sampleCount;
+                at[fdmRef.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                at[fdmRef.attachment].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                at[fdmRef.attachment].stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_LOAD;
+                at[fdmRef.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                at[fdmRef.attachment].initialLayout  = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+                at[fdmRef.attachment].finalLayout    = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+
+                renderPassCreationFdmExt.fragmentDensityMapAttachment = fdmRef;
+                renderPassCreationFdmExt.pNext = rpInfo.pNext;
+                rpInfo.pNext = &renderPassCreationFdmExt;
+            }
+
             const uint32_t viewMask = 0b00000011;
             const uint32_t correlationMask = 0b00000011;
             VkRenderPassMultiviewCreateInfo renderPassMultiviewCI = {
@@ -924,8 +947,10 @@ namespace Conformance
             VkAttachmentReference2 depthRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT};
             VkAttachmentReference2 colorResolveRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 2, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_COLOR_BIT};
             VkAttachmentReference2 depthResolveRef2 = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 3, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, VK_IMAGE_ASPECT_DEPTH_BIT};
+            VkAttachmentReference2 fdmRef2   = {VK_STRUCTURE_TYPE_ATTACHMENT_REFERENCE_2, nullptr, 4, VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT , VK_IMAGE_ASPECT_COLOR_BIT};
+            VkAttachmentReference  fdmRef22  = {4, VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT};
 
-            std::array<VkAttachmentDescription2KHR, 4> at2 = {};
+            std::array<VkAttachmentDescription2KHR, 5> at2 = {};
 
             VkSubpassDescriptionDepthStencilResolveKHR vkSubpassDescriptionDepthStencilResolve;
             vkSubpassDescriptionDepthStencilResolve.sType = VK_STRUCTURE_TYPE_SUBPASS_DESCRIPTION_DEPTH_STENCIL_RESOLVE_KHR;
@@ -1030,6 +1055,21 @@ namespace Conformance
                     rpInfo2.pNext = &renderPassMultiviewCI;
                 }
 
+                if (fdmFmt != VK_FORMAT_UNDEFINED) {
+                    at2[fdmRef2.attachment].format = fdmFmt;
+                    at2[fdmRef2.attachment].samples = sampleCount;
+                    at2[fdmRef2.attachment].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+                    at2[fdmRef2.attachment].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                    at2[fdmRef2.attachment].stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_LOAD;
+                    at2[fdmRef2.attachment].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+                    at2[fdmRef2.attachment].initialLayout  = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+                    at2[fdmRef2.attachment].finalLayout    = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+
+                    renderPassCreationFdmExt.fragmentDensityMapAttachment = fdmRef22;
+                    renderPassCreationFdmExt.pNext = rpInfo2.pNext;
+                    rpInfo2.pNext = &renderPassCreationFdmExt;
+                }
+
                 ALOGE("%s:msaa create render pass", __func__);
 
                 XRC_CHECK_THROW_VKCMD(vkCreateRenderPass2KHR(m_vkDevice, &rpInfo2, nullptr, &pass));
@@ -1083,8 +1123,10 @@ namespace Conformance
     {
         VkImage colorImage{VK_NULL_HANDLE};
         VkImage depthImage{VK_NULL_HANDLE};
+        VkImage fdmImage{VK_NULL_HANDLE};
         VkImageView colorView{VK_NULL_HANDLE};
         VkImageView depthView{VK_NULL_HANDLE};
+        VkImageView fdmView{VK_NULL_HANDLE};
         VkFramebuffer fb{VK_NULL_HANDLE};
 
         #ifdef FEATURE_ADD_MSAA
@@ -1108,6 +1150,9 @@ namespace Conformance
                 if (depthView != VK_NULL_HANDLE) {
                     vkDestroyImageView(m_vkDevice, depthView, nullptr);
                 }
+                if (fdmView != VK_NULL_HANDLE) {
+                    vkDestroyImageView(m_vkDevice, fdmView, nullptr);
+                }
                 #ifdef FEATURE_ADD_MSAA
                 if (colorViewResolve != VK_NULL_HANDLE) {
                     vkDestroyImageView(m_vkDevice, colorViewResolve, nullptr);
@@ -1121,8 +1166,10 @@ namespace Conformance
             // Note we don't own color/depthImage, it will get destroyed when xrDestroySwapchain is called
             colorImage = VK_NULL_HANDLE;
             depthImage = VK_NULL_HANDLE;
+            fdmImage = VK_NULL_HANDLE;
             colorView = VK_NULL_HANDLE;
             depthView = VK_NULL_HANDLE;
+            fdmView = VK_NULL_HANDLE;
         #ifdef FEATURE_ADD_MSAA
             colorImageResolve = VK_NULL_HANDLE;
             depthImageResolve = VK_NULL_HANDLE;
@@ -1140,6 +1187,8 @@ namespace Conformance
             swap(depthImage, other.depthImage);
             swap(colorView, other.colorView);
             swap(depthView, other.depthView);
+            swap(fdmView, other.fdmView);
+            swap(fdmImage, other.fdmImage);
 
             #ifdef FEATURE_ADD_MSAA
             swap(colorImageResolve, other.colorImageResolve);
@@ -1163,6 +1212,8 @@ namespace Conformance
             swap(depthImage, other.depthImage);
             swap(colorView, other.colorView);
             swap(depthView, other.depthView);
+            swap(fdmView, other.fdmView);
+            swap(fdmImage, other.fdmImage);
 
             #ifdef FEATURE_ADD_MSAA
             swap(colorImageResolve, other.colorImageResolve);
@@ -1177,6 +1228,7 @@ namespace Conformance
         }
         void Create(const VulkanDebugObjectNamer& namer, VkDevice device, VkImage aColorImage, VkImage aDepthOrStencilImage,
                     VkImageAspectFlags depthOrStencilImageAspect, uint32_t baseArrayLayer, VkExtent2D size, RenderPass& renderPass, VkImage aColorImageMSAA, VkImage aDepthOrStencilImageMSAA,
+                    VkImage aFdmImage,
                     bool msaa_enable, bool multiview_enable)
         {
             m_vkDevice = device;
@@ -1196,8 +1248,9 @@ namespace Conformance
                 colorImage = aColorImage;
                 depthImage = aDepthOrStencilImage;
             #endif
+            fdmImage   = aFdmImage;
 
-            std::array<VkImageView, 4> attachments{};
+            std::array<VkImageView, 5> attachments{};
             uint32_t attachmentCount = 0;
 
             // Create color image view
@@ -1307,6 +1360,24 @@ namespace Conformance
                 }
             }
             #endif
+            if (fdmImage != VK_NULL_HANDLE) {
+                VkImageViewCreateInfo fdmViewInfo{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+                fdmViewInfo.image = aFdmImage;
+                fdmViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+                fdmViewInfo.format = renderPass.fdmFmt;
+                fdmViewInfo.components.r = VK_COMPONENT_SWIZZLE_R;
+                fdmViewInfo.components.g = VK_COMPONENT_SWIZZLE_G;
+                fdmViewInfo.components.b = VK_COMPONENT_SWIZZLE_B;
+                fdmViewInfo.components.a = VK_COMPONENT_SWIZZLE_A;
+                fdmViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+                fdmViewInfo.subresourceRange.baseMipLevel = 0;
+                fdmViewInfo.subresourceRange.levelCount = 1;
+                fdmViewInfo.subresourceRange.baseArrayLayer = baseArrayLayer;
+                fdmViewInfo.subresourceRange.layerCount = 1;
+                XRC_CHECK_THROW_VKCMD(vkCreateImageView(m_vkDevice, &fdmViewInfo, nullptr, &fdmView));
+                XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE_VIEW, (uint64_t)colorView, "CTS fdm image view"));
+                attachments[attachmentCount++] = fdmView;
+            }
 
             VkFramebufferCreateInfo fbInfo{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
             fbInfo.renderPass = renderPass.pass;

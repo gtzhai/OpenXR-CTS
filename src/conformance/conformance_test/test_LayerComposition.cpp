@@ -1598,7 +1598,7 @@ namespace Conformance
         for (int layer = 0; layer < LayerCount; layer++) {
             projLayers[layer] = compositionHelper.CreateProjectionLayer(localSpace);
 
-            //projLayers[layer]->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+            projLayers[layer]->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
 
             // Add depth test info to the chain for each projection layer
             depthTestInfo[layer].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_TEST_FB;

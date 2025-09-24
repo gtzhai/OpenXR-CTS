@@ -193,7 +193,7 @@ namespace Conformance
         Pipeline m_pipeCompute{};
 
         void init(const VulkanDebugObjectNamer& namer, VkDevice device, uint32_t capacity, const VkExtent2D size, VkFormat colorFormat,
-                  VkFormat depthFormat, VkSampleCountFlagBits sampleCount, const PipelineLayout& layout,
+                  VkFormat depthFormat, VkFormat fdmFormat, VkSampleCountFlagBits sampleCount, const PipelineLayout& layout,
                   const PipelineLayout& computeLayout, const ShaderProgram& sp, const ShaderProgram& spCompute,
                   const VkVertexInputBindingDescription& bindDesc, span<const VkVertexInputAttributeDescription> attrDesc)
         {
@@ -201,7 +201,7 @@ namespace Conformance
             bool multiview_enable =  Conformance::GetGlobalData().IsUsingMultiview();
 
             m_renderTarget.resize(capacity);
-            m_rp.Create(namer, device, colorFormat, depthFormat, sampleCount, msaa_enable, multiview_enable);
+            m_rp.Create(namer, device, colorFormat, depthFormat, fdmFormat, sampleCount, msaa_enable, multiview_enable);
             VkDynamicState dynamicStates[] = {VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_VIEWPORT};
             m_pipe.Create(device, size, layout, m_rp, sp, bindDesc, attrDesc, dynamicStates);
 
@@ -231,7 +231,7 @@ namespace Conformance
             #endif
 
             for (auto& slice : m_slices) {
-                slice.init(m_namer, m_vkDevice, capacity, m_size, colorFormat, m_depthFormat, m_sampleCount, layout, computeLayout, sp,
+                slice.init(m_namer, m_vkDevice, capacity, m_size, colorFormat, m_depthFormat, m_fdmFormat, m_sampleCount, layout, computeLayout, sp,
                            spCompute, bindDesc, attrDesc);
             }
 
@@ -257,6 +257,26 @@ namespace Conformance
             , m_slices(swapchainCreateInfo.arraySize)
         {
             init(capacity, (VkFormat)swapchainCreateInfo.format, layout, computeLayout, sp, spCompute, bindDesc, attrDesc);
+
+            void * tmp_next = (void *)swapchainCreateInfo.next;
+            while(tmp_next != nullptr){
+                XrSwapchainImageBaseHeader *tmp= (XrSwapchainImageBaseHeader *)tmp_next;
+                if(tmp->type == XR_TYPE_SWAPCHAIN_CREATE_INFO_FOVEATION_FB){
+
+                    m_fdmImages.clear();
+	                m_fdmImages.resize(capacity, {XR_TYPE_SWAPCHAIN_IMAGE_FOVEATION_VULKAN_FB});
+
+	                for (size_t i= 0; i < capacity; i++)
+	                {
+                        XrSwapchainImageBaseHeader* tmp = GetGenericColorImage(i);
+		                m_fdmImages[i].next = tmp->next;
+		                tmp->next = &m_fdmImages[i];
+	                }
+                    m_fdmFormat = VK_FORMAT_R8G8_UNORM;
+                    break;
+                }
+                tmp_next = (void *)(((XrSwapchainImageBaseHeader *)tmp_next)->next);
+            }
         }
 
         VulkanSwapchainImageData(const VulkanDebugObjectNamer& namer, uint32_t capacity, const XrSwapchainCreateInfo& swapchainCreateInfo,
@@ -292,11 +312,11 @@ namespace Conformance
             if (rt.fb == VK_NULL_HANDLE) {
                 bool multiview_enable = GetGlobalData().IsUsingMultiview();
             #ifdef FEATURE_ADD_MSAA
-                rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image, secondAttachmentAspect,
-                          arraySlice, m_size, rp, m_colorBufferMSAA[index].GetTexture().image, m_depthBufferMSAA[index].GetTexture().image, 
+                rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image,  secondAttachmentAspect,
+                          arraySlice, m_size, rp, m_colorBufferMSAA[index].GetTexture().image, m_depthBufferMSAA[index].GetTexture().image, m_fdmImages.size()>0 ? m_fdmImages[index].image:VK_NULL_HANDLE,
                           msaa_enable, multiview_enable);
             #else
-                rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image, secondAttachmentAspect,
+                rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image, m_fdmImages.size()>0 ? m_fdmImages[index].image:VK_NULL_HANDLE, secondAttachmentAspect,
                           arraySlice, m_size, rp, VK_NULL_HANDLE, VK_NULL_HANDLE, 
                           false, multiview_enable);
             #endif
@@ -342,6 +362,7 @@ namespace Conformance
             m_depthBufferMSAA.clear();
             m_colorBufferMSAA.clear();
             #endif
+            m_fdmImages.clear();
 
             SwapchainImageDataBase::Reset();
         }
@@ -396,6 +417,8 @@ namespace Conformance
         VkFormat m_depthFormat{VK_FORMAT_D32_SFLOAT};
 
         std::vector<VulkanArraySliceState> m_slices;
+        std::vector<XrSwapchainImageFoveationVulkanFB>  m_fdmImages;
+        VkFormat m_fdmFormat{VK_FORMAT_UNDEFINED};
     };
 
 #if defined(USE_MIRROR_WINDOW)
@@ -806,6 +829,7 @@ namespace Conformance
         GLTFModelInstanceHandle CreateGLTFModelInstance(GLTFModelHandle handle) override;
         Pbr::ModelInstance& GetModelInstance(GLTFModelInstanceHandle handle) override;
 
+        void SetEyeTrackedCenter( XrVector2f& left, XrVector2f& right) override;
         void RenderView(const XrCompositionLayerProjectionView& layerView, const XrSwapchainImageBaseHeader* colorSwapchainImage,
                         const RenderParams& params, bool isMotionVectorPass = false, const XrCompositionLayerProjectionView* prevLayerView = nullptr,
                         const XrCompositionLayerProjectionView* nextLayerView = nullptr, const XrCompositionLayerProjectionView* nextPrevLayerView = nullptr,
@@ -853,6 +877,10 @@ namespace Conformance
         VkPhysicalDevice m_vkPhysicalDevice{VK_NULL_HANDLE};
 
     private:
+        XrVector2f m_etLeftCenter;
+        XrVector2f m_etRightCenter;
+        bool       m_etOffsetUsed{false};
+
         XrGraphicsBindingVulkan2KHR m_graphicsBinding{XR_TYPE_GRAPHICS_BINDING_VULKAN2_KHR};
         SwapchainImageDataMap<VulkanSwapchainImageData> m_swapchainImageDataMap;
 
@@ -1201,6 +1229,9 @@ namespace Conformance
             for (uint32_t i = 0; i < createInfo->vulkanCreateInfo->enabledExtensionCount; ++i) {
                 extensions.push_back(createInfo->vulkanCreateInfo->ppEnabledExtensionNames[i]);
             }
+
+            extensions.push_back("VK_EXT_fragment_density_map");
+            extensions.push_back("VK_EXT_fragment_density_map2");
 
             #ifdef FEATURE_ADD_MSAA
             bool msaa_enable = GetGlobalData().IsUsingMSAA();
@@ -2593,6 +2624,13 @@ namespace Conformance
         return m_gltfInstances[handle].GetModelInstance();
     }
 
+    void VulkanGraphicsPlugin::SetEyeTrackedCenter( XrVector2f& left, XrVector2f& right)
+    {
+        m_etLeftCenter  = left;
+        m_etRightCenter = right;
+        m_etOffsetUsed  = true;
+    }
+
     void VulkanGraphicsPlugin::RenderView(const XrCompositionLayerProjectionView& layerView,
                                           const XrSwapchainImageBaseHeader* colorSwapchainImage, const RenderParams& params, bool isMotionVectorPass, const XrCompositionLayerProjectionView* prevLayerView, 
                                           const XrCompositionLayerProjectionView* nextLayerView, const XrCompositionLayerProjectionView* nextPrevLayerView,
@@ -2957,7 +2995,82 @@ namespace Conformance
 
         }
 
-        vkCmdEndRenderPass(buf);
+        if(m_etOffsetUsed){
+            //Log::Write(Log::Level::Error, "et offset used");
+            PFN_vkGetPhysicalDeviceFeatures2 pfnvkGetPhysicalDeviceFeatures2 = NULL;
+            pfnvkGetPhysicalDeviceFeatures2 = (PFN_vkGetPhysicalDeviceFeatures2)vkGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceFeatures2");
+
+            PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr )vkGetInstanceProcAddr(m_vkInstance, "vkGetDeviceProcAddr");;
+            //Log::Write(Log::Level::Error, Fmt("0.1:%p", vkGetDeviceProcAddr));
+            PFN_vkCmdEndRenderPass2KHR vkCmdEndRenderPass2KHR = NULL;
+            if(vkGetDeviceProcAddr != NULL){
+                vkCmdEndRenderPass2KHR = (PFN_vkCmdEndRenderPass2KHR)vkGetDeviceProcAddr(m_vkDevice, "vkCmdEndRenderPass2KHR");
+            }
+                
+            //Log::Write(Log::Level::Error, Fmt("0.2:%p", vkCmdEndRenderPass2KHR));
+            //check feature
+            VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM  offset_feature = {
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+                .pNext = NULL,
+                .fragmentDensityMapOffset = VK_FALSE
+            };
+
+            //Log::Write(Log::Level::Error, Fmt("1:%p", pfnvkGetPhysicalDeviceFeatures2));
+            if(pfnvkGetPhysicalDeviceFeatures2 && vkCmdEndRenderPass2KHR){
+                VkPhysicalDeviceFeatures2 physical_device_features = {
+                    .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2,
+                    .pNext = NULL,
+                };
+                physical_device_features.pNext = (void *)&offset_feature;
+                pfnvkGetPhysicalDeviceFeatures2(   //
+                        m_vkPhysicalDevice,            // physicalDevice
+                        &physical_device_features); // pFeatures
+            }
+
+            //Log::Write(Log::Level::Error, Fmt("2:%d", offset_feature.fragmentDensityMapOffset));
+            if(offset_feature.fragmentDensityMapOffset == VK_TRUE){
+                //check properties
+                PFN_vkGetPhysicalDeviceProperties2KHR pfnvkGetPhysicalDeviceProperties2KHR =
+                    (PFN_vkGetPhysicalDeviceProperties2KHR)vkGetInstanceProcAddr(m_vkInstance, "vkGetPhysicalDeviceProperties2KHR");
+                VkPhysicalDeviceFragmentDensityMapOffsetPropertiesQCOM offsetProperties = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_PROPERTIES_QCOM };
+                //Log::Write(Log::Level::Error, Fmt("3:%p", pfnvkGetPhysicalDeviceProperties2KHR));
+                if (pfnvkGetPhysicalDeviceProperties2KHR) {
+                    VkPhysicalDeviceProperties2 properties = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2};
+                    properties.pNext = &offsetProperties;
+                    pfnvkGetPhysicalDeviceProperties2KHR(m_vkPhysicalDevice, &properties);
+                } else {
+                    offsetProperties.fragmentDensityOffsetGranularity.width  = 8;
+                    offsetProperties.fragmentDensityOffsetGranularity.height = 8;
+                }
+
+                #define ALIGN(size, align) ((size + align - 1) & (~(align - 1)))
+                //Log::Write(Log::Level::Error, Fmt("4:%d,%d", offsetProperties.fragmentDensityOffsetGranularity.width, offsetProperties.fragmentDensityOffsetGranularity.height));
+                //update fdm offsets
+                VkOffset2D offsets[2] = {};
+                offsets[0].x = ALIGN(offsets[0].x, offsetProperties.fragmentDensityOffsetGranularity.width);
+                offsets[0].y = ALIGN(offsets[0].y, offsetProperties.fragmentDensityOffsetGranularity.height);
+                offsets[1].x = ALIGN(offsets[1].x, offsetProperties.fragmentDensityOffsetGranularity.width);
+                offsets[1].y = ALIGN(offsets[1].y, offsetProperties.fragmentDensityOffsetGranularity.height);
+
+                VkSubpassFragmentDensityMapOffsetEndInfoQCOM offsetInfo =
+                {
+                    .sType = VK_STRUCTURE_TYPE_SUBPASS_FRAGMENT_DENSITY_MAP_OFFSET_END_INFO_QCOM,
+                    .pNext = nullptr,
+                    .fragmentDensityOffsetCount = 2, // fragmentDensityOffsetCount; 1 for each layer/multiview view
+                    .pFragmentDensityOffsets     = offsets, // offsets are aligned to fragmentDensityOffsetGranularity
+                };
+
+                VkSubpassEndInfo subpassEndinfo = {VK_STRUCTURE_TYPE_SUBPASS_END_INFO_KHR};
+                subpassEndinfo.pNext = &offsetInfo;
+                // Only offets given to the last subpass are used for the whole renderpass
+                // Offsets given in other subpasses are ignored
+                vkCmdEndRenderPass2KHR(buf, &subpassEndinfo);
+            } else {
+                vkCmdEndRenderPass(buf);
+            }
+        } else {
+            vkCmdEndRenderPass(buf);
+        }
 
         CHECKPOINT();
 

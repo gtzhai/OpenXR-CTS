@@ -290,6 +290,11 @@ namespace Conformance
             // Default no-op implementation for APIs which don't need checking.
         }
 
+        virtual void SetEyeTrackedCenter( XrVector2f& /*left*/, XrVector2f& /*right*/)
+        {
+            // Default no-op implementation for APIs which don't need checking.
+        }
+
         /// Called when changing graphics interaction thread.
         virtual void MakeCurrent(bool /*bindToThread*/)
         {

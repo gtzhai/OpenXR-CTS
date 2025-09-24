@@ -473,6 +473,24 @@ namespace Conformance
         return IsGraphicsPluginRequired() || !Options::Get().graphicsPlugin.empty();
     }
 
+    bool GlobalData::IsGraphicsPluginVulkan() const
+    {
+        if((Options::Get().graphicsPlugin == "vulkan") || (Options::Get().graphicsPlugin == "vulkan2")){
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    bool GlobalData::IsGraphicsPluginGlES() const
+    {
+        if((Options::Get().graphicsPlugin == "opengles")){
+            return true;
+        } else {
+            return false;
+        }
+    }
+
     bool GlobalData::IsUsingConformanceAutomation() const
     {
         return IsInstanceExtensionEnabled(XR_EXT_CONFORMANCE_AUTOMATION_EXTENSION_NAME);

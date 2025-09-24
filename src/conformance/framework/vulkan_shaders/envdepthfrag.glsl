@@ -38,6 +38,7 @@ void main()
   
     // Sample from Environment Depth API texture
     highp vec3 depthViewCoord = vec3(cubeDepthCameraPositionHC, VIEW_ID);
+    depthViewCoord.y = 1.0f - depthViewCoord.y;
     highp float depthViewEyeZ = texture(EnvironmentDepthTexture, depthViewCoord).r;
     //depthViewEyeZ = texture(EnvironmentDepthTexture, vec3(0.5f, 0.5f, VIEW_ID)).r;
   
