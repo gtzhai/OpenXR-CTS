@@ -188,7 +188,7 @@ namespace Conformance
 
         static const VkFlags defaultFlags = VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
-        void Allocate(VkMemoryRequirements const& memReqs, VkDeviceMemory* mem, VkFlags flags = defaultFlags,
+        VkDeviceSize Allocate(VkMemoryRequirements const& memReqs, VkDeviceMemory* mem, VkFlags flags = defaultFlags,
                       const void* pNext = nullptr) const
         {
             // Search memtypes to find first index with those properties
@@ -200,7 +200,7 @@ namespace Conformance
                         memAlloc.allocationSize = memReqs.size;
                         memAlloc.memoryTypeIndex = i;
                         XRC_CHECK_THROW_VKCMD(vkAllocateMemory(m_vkDevice, &memAlloc, nullptr, mem))
-                        return;
+                        return memAlloc.allocationSize;
                     }
                 }
             }
@@ -1752,7 +1752,7 @@ namespace Conformance
         }
 
         void Allocate(const VulkanDebugObjectNamer& namer, VkDevice device, MemoryAllocator* memAllocator, VkFormat depthFormat,
-                      uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount, bool protectedMemory)
+                      uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount, bool protectedMemory, bool ffr_soft_fdm_offset)
         {
             Reset();
 
@@ -1777,6 +1777,10 @@ namespace Conformance
             m_xrImage.image = depthImage;
             if(protectedMemory){
                 imageInfo.flags = VK_IMAGE_CREATE_PROTECTED_BIT;
+            }
+
+            if(ffr_soft_fdm_offset){
+                imageInfo.flags |= 0x00008000;  /*VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_QCOM*/
             }
 
             VkMemoryRequirements memRequirements{};
@@ -1883,7 +1887,7 @@ namespace Conformance
         }
 
         void Allocate(const VulkanDebugObjectNamer& namer, VkDevice device, MemoryAllocator* memAllocator, VkFormat colorFormat,
-                      uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount, bool protectedMemory)
+                      uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount, bool protectedMemory, bool ffr_soft_fdm_offset)
         {
             Reset();
 
@@ -1908,6 +1912,10 @@ namespace Conformance
             m_xrImage.image = colorImage;
             if(protectedMemory){
                 imageInfo.flags = VK_IMAGE_CREATE_PROTECTED_BIT;
+            }
+
+            if(ffr_soft_fdm_offset){
+                imageInfo.flags |= 0x00008000;  /*VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_QCOM*/
             }
 
             VkMemoryRequirements memRequirements{};
@@ -1948,6 +1956,180 @@ namespace Conformance
 
         ColorBuffer(const ColorBuffer&) = delete;
         ColorBuffer& operator=(const ColorBuffer&) = delete;
+
+    private:
+        bool m_initialized{false};
+        VkDevice m_vkDevice{VK_NULL_HANDLE};
+        VkImageLayout m_vkLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        XrSwapchainImageVulkanKHR m_xrImage{XR_TYPE_SWAPCHAIN_IMAGE_VULKAN_KHR, nullptr, VK_NULL_HANDLE};
+    };
+
+    struct FDMColorBuffer
+    {
+        VkDeviceMemory colorMemory{VK_NULL_HANDLE};
+        VkImage colorImage{VK_NULL_HANDLE};
+
+        FDMColorBuffer() = default;
+        ~FDMColorBuffer()
+        {
+            Reset();
+        }
+
+        void Reset()
+        {
+            if (m_vkDevice != nullptr) {
+                if (colorImage != VK_NULL_HANDLE) {
+                    vkDestroyImage(m_vkDevice, colorImage, nullptr);
+                }
+                if (colorMemory != VK_NULL_HANDLE) {
+                    vkFreeMemory(m_vkDevice, colorMemory, nullptr);
+                }
+            }
+            colorImage = VK_NULL_HANDLE;
+            colorMemory = VK_NULL_HANDLE;
+            m_vkDevice = nullptr;
+            m_initialized = false;
+        }
+        void swap(FDMColorBuffer& other) noexcept
+        {
+            using std::swap;
+
+            swap(colorImage, other.colorImage);
+            swap(colorMemory, other.colorMemory);
+            swap(m_vkDevice, other.m_vkDevice);
+            swap(m_initialized, other.m_initialized);
+            swap(m_xrImage, other.m_xrImage);
+        }
+
+        FDMColorBuffer(FDMColorBuffer&& other) noexcept : FDMColorBuffer()
+        {
+            swap(other);
+        }
+        FDMColorBuffer& operator=(FDMColorBuffer&& other) noexcept
+        {
+            if (&other == this) {
+                return *this;
+            }
+            // clean up self
+            this->~FDMColorBuffer();
+            swap(other);
+
+            return *this;
+        }
+
+        bool Allocated()
+        {
+            return m_initialized;
+        }
+
+        uint32_t extent_in_pixels_to_tiles(uint32_t length_in_pixels) {
+            return length_in_pixels / 32.0 + 0.5f;
+        }
+
+        void Allocate(const VulkanDebugObjectNamer& namer, VkDevice device, MemoryAllocator* memAllocator, VkFormat colorFormat,
+                      uint32_t width, uint32_t height, uint32_t arraySize, uint32_t sampleCount, bool ffr_soft_fdm_offset)
+        {
+            Reset();
+
+            m_vkDevice = device;
+
+            // Create a D32 colorbuffer
+            VkImageCreateInfo imageInfo{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+            imageInfo.imageType = VK_IMAGE_TYPE_2D;
+            imageInfo.extent.width = width;
+            imageInfo.extent.height = height;
+            imageInfo.flags  = ffr_soft_fdm_offset?VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_QCOM:0;
+            imageInfo.extent.width = extent_in_pixels_to_tiles(width);
+            imageInfo.extent.height = extent_in_pixels_to_tiles(height);
+            imageInfo.extent.depth = 1;
+            imageInfo.mipLevels = 1;
+            imageInfo.arrayLayers = arraySize;
+            imageInfo.format = colorFormat;
+            imageInfo.tiling = VK_IMAGE_TILING_LINEAR;
+            imageInfo.initialLayout = VK_IMAGE_LAYOUT_FRAGMENT_DENSITY_MAP_OPTIMAL_EXT;
+            imageInfo.usage = VK_IMAGE_USAGE_FRAGMENT_DENSITY_MAP_BIT_EXT;
+            imageInfo.samples = (VkSampleCountFlagBits)sampleCount;
+            imageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+            XRC_CHECK_THROW_VKCMD(vkCreateImage(device, &imageInfo, nullptr, &colorImage));
+            XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_IMAGE, (uint64_t)colorImage, "CTS fdm color image"));
+            m_xrImage.image = colorImage;
+            //imageInfo.flags = VK_IMAGE_CREATE_PROTECTED_BIT;
+            if(ffr_soft_fdm_offset){
+                imageInfo.flags |= 0x00008000;  /*VK_IMAGE_CREATE_FRAGMENT_DENSITY_MAP_OFFSET_BIT_QCOM*/
+            }
+
+            VkImageSubresource image_subresource = {};
+            image_subresource.mipLevel = 0;
+            image_subresource.arrayLayer = 0;
+            image_subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            VkSubresourceLayout subresourceLayout = {};
+            vkGetImageSubresourceLayout(m_vkDevice, colorImage, &image_subresource,
+                                    &subresourceLayout);
+
+            VkMemoryRequirements memRequirements{};
+            vkGetImageMemoryRequirements(device, colorImage, &memRequirements);
+            VkDeviceSize allocSize;
+            memAllocator->Allocate(memRequirements, &colorMemory, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT);
+            XRC_CHECK_THROW_VKCMD(namer.SetName(VK_OBJECT_TYPE_DEVICE_MEMORY, (uint64_t)colorMemory, "CTS fdm color image memory"));
+            XRC_CHECK_THROW_VKCMD(vkBindImageMemory(device, colorImage, colorMemory, 0));
+
+            {
+                void *data = NULL;
+                unsigned char *foveationImageData = nullptr;
+                XRC_CHECK_THROW_VKCMD(vkMapMemory(m_vkDevice, colorMemory, 0, allocSize, 0, &data));
+                memset(data, 0xFF, allocSize);
+
+                int arrayPitch = subresourceLayout.arrayPitch;
+                int stride = subresourceLayout.rowPitch;
+                int bytePerPixel = 2;
+                // We don't support double wide now. Maybe our Unreal plugin will support double wide.
+                bool isLayoutDoubleWide = false;
+                int viewCount = isLayoutDoubleWide ? 2 : 1;
+
+                for (int array = 0; array < arraySize; array++) {   // array_size = 2; enable multiview
+                    data = (unsigned char *) data + array * arrayPitch;
+                    for (int i = 0; i < imageInfo.extent.height; i++) {
+                        for (int view = 0; view < viewCount; view++) {
+                            for (int j = 0; j < imageInfo.extent.width; j++) {
+                                int r_index, g_index;
+                                g_index = r_index = i * imageInfo.extent.width + j;
+                                int pixel_start_index = i * stride + j * bytePerPixel;
+                                if((i<(imageInfo.extent.height/3) || i>(imageInfo.extent.height*2/3))
+                                &&(j<(imageInfo.extent.width/3) || j>(imageInfo.extent.width*2/3)))
+                                {
+                                    *((unsigned char *) data + pixel_start_index) = 0x7F;
+                                    *((unsigned char *) data + pixel_start_index + 1) = 0x7F;
+                                } else {
+                                    *((unsigned char *) data + pixel_start_index) = 0x7F;
+                                    *((unsigned char *) data + pixel_start_index + 1) = 0x7F;
+                                }
+                            }
+                        }
+                    }
+                }
+                vkUnmapMemory(m_vkDevice, colorMemory);
+                free(foveationImageData);
+                foveationImageData = NULL;
+            }
+
+            m_initialized = true;
+        }
+
+        void TransitionLayout(CmdBuffer* cmdBuffer, VkImageLayout newLayout)
+        {
+            if (!m_initialized || (newLayout == m_vkLayout)) {
+                return;
+            }
+            (void*)cmdBuffer;
+            return;
+        }
+        const XrSwapchainImageVulkanKHR& GetTexture() const
+        {
+            return m_xrImage;
+        }
+
+        FDMColorBuffer(const FDMColorBuffer&) = delete;
+        FDMColorBuffer& operator=(const FDMColorBuffer&) = delete;
 
     private:
         bool m_initialized{false};

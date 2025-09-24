@@ -501,6 +501,21 @@ namespace Conformance
         return isUsingMSAA;
     }
 
+    bool GlobalData::IsUsingFFR() const
+    {
+        return isUsingFFR;
+    }
+
+    bool GlobalData::IsUsingAppFDM() const
+    {
+        return isUsingAppFDM;
+    }
+
+    bool GlobalData::IsUsingFFRSoftFDMOffset() const
+    {
+        return isUsingFFRSoftFDMOffset;
+    }
+
     bool GlobalData::IsGraphicsPluginVulkan()
     {
         return Options::Get().graphicsPlugin == "vulkan";

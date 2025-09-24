@@ -329,10 +329,22 @@ namespace Conformance
         bool IsUsingEnvDepthOcclusion() const;
         bool IsGraphicsPluginVulkan();
         bool IsProtectedMemory() const;
+        bool IsUsingFFR() const;
+        bool IsUsingAppFDM() const;
+        bool IsUsingFFRSoftFDMOffset() const;
         void SetProtectedMemory(bool isProtect) {
             isProtectedMemory = isProtect;
         };
+        void SetUsingFFR(bool ffr) {
+            isUsingFFR = ffr;
+        };
+        void SetUsingAppFDM(bool appFDM) {
+            isUsingAppFDM = appFDM;
+        };
 
+        void SetUsingFFRSoftFDMOffset(bool ffrSoftFDMOffset) {  
+            isUsingFFRSoftFDMOffset = ffrSoftFDMOffset;
+        }
         void SetUsingMultiview(bool multiview) {
             isUsingMultiView = multiview;
         };
@@ -418,6 +430,9 @@ namespace Conformance
         bool isUsingMultiView{false};
         bool isUsingEnvDepthOcclusion{false};
         bool isProtectedMemory{false};
+        bool isUsingFFR{false};
+        bool isUsingAppFDM{false};
+        bool isUsingFFRSoftFDMOffset{false};
 
     private:
         VersionDependentDataArray versionDependentData;

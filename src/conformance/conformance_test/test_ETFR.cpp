@@ -190,6 +190,10 @@ namespace Conformance
     TEST_CASE("ProjectionVulkanFFR", "[composition][interactive][FFR]")
     {
         GlobalData& globalData = GetGlobalData();
+
+        globalData.SetUsingFFR(true);
+        globalData.SetUsingAppFDM(false);
+        globalData.SetUsingFFRSoftFDMOffset(false);
 #ifdef XR_USE_PLATFORM_ANDROID
         ALOGE("test ffr validation");
 #endif
@@ -301,6 +305,9 @@ namespace Conformance
 #ifdef XR_USE_PLATFORM_ANDROID
         ALOGE("test etfr validation");
 #endif
+        globalData.SetUsingFFR(true);
+        globalData.SetUsingAppFDM(true);
+        globalData.SetUsingFFRSoftFDMOffset(true);
 
         if (!globalData.IsUsingGraphicsPlugin()) {
             SKIP("Test run not using graphics plugin or not vulkan");

@@ -229,6 +229,7 @@ namespace Conformance
             m_depthBufferMSAA.resize(capacity);
             m_colorBufferMSAA.resize(capacity);
             #endif
+            m_colorBufferFDM.resize(capacity);
 
             for (auto& slice : m_slices) {
                 slice.init(m_namer, m_vkDevice, capacity, m_size, colorFormat, m_depthFormat, m_fdmFormat, m_sampleCount, layout, computeLayout, sp,
@@ -272,7 +273,16 @@ namespace Conformance
 		                m_fdmImages[i].next = tmp->next;
 		                tmp->next = &m_fdmImages[i];
 	                }
+
                     m_fdmFormat = VK_FORMAT_R8G8_UNORM;
+                    if(GetGlobalData().IsUsingAppFDM()){
+                        m_fdmImagesSelf.clear();
+                        m_fdmImagesSelf.resize(capacity, {XR_TYPE_SWAPCHAIN_IMAGE_FOVEATION_VULKAN_FB});
+                        for (size_t i= 0; i < capacity; i++) {
+                            prepareFdmImage(m_fdmFormat);
+                            //Log::Write(Log::Level::Error, Fmt("FFR: self image %d is 0x%x",i, m_fdmImagesSelf[i].image ));
+                        }
+                    }
                     break;
                 }
                 tmp_next = (void *)(((XrSwapchainImageBaseHeader *)tmp_next)->next);
@@ -311,12 +321,16 @@ namespace Conformance
             RenderPass& rp = m_slices[arraySlice].m_rp;
             if (rt.fb == VK_NULL_HANDLE) {
                 bool multiview_enable = GetGlobalData().IsUsingMultiview();
+                VkImage fdmi = VK_NULL_HANDLE;
+                if(m_fdmFormat != VK_FORMAT_UNDEFINED){
+                    fdmi = GetGlobalData().IsUsingAppFDM()? m_fdmImagesSelf[index].image:m_fdmImages[index].image;
+                }
             #ifdef FEATURE_ADD_MSAA
                 rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image,  secondAttachmentAspect,
-                          arraySlice, m_size, rp, m_colorBufferMSAA[index].GetTexture().image, m_depthBufferMSAA[index].GetTexture().image, m_fdmImages.size()>0 ? m_fdmImages[index].image:VK_NULL_HANDLE,
+                          arraySlice, m_size, rp, m_colorBufferMSAA[index].GetTexture().image, m_depthBufferMSAA[index].GetTexture().image, fdmi,
                           msaa_enable, multiview_enable);
             #else
-                rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image, m_fdmImages.size()>0 ? m_fdmImages[index].image:VK_NULL_HANDLE, secondAttachmentAspect,
+                rt.Create(m_namer, m_vkDevice, GetTypedImage(index).image, GetDepthImageForColorIndex(index).image, fdmi, secondAttachmentAspect,
                           arraySlice, m_size, rp, VK_NULL_HANDLE, VK_NULL_HANDLE, 
                           false, multiview_enable);
             #endif
@@ -363,6 +377,7 @@ namespace Conformance
             m_colorBufferMSAA.clear();
             #endif
             m_fdmImages.clear();
+            m_colorBufferFDM.clear();
 
             SwapchainImageDataBase::Reset();
         }
@@ -377,13 +392,16 @@ namespace Conformance
             return m_slices;
         }
 
+        VkExtent2D GetSize() const {
+            return m_size;
+        }
     protected:
         const XrSwapchainImageVulkanKHR& GetFallbackDepthSwapchainImage(uint32_t i) override
         {
             if (!m_depthBuffer[i].Allocated()) {
                 bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
                 m_depthBuffer[i].Allocate(m_namer, m_vkDevice, m_memAllocator, m_depthFormat, this->Width(), this->Height(),
-                                          this->ArraySize(), this->SampleCount(), isProtectedMemory);
+                                          this->ArraySize(), this->SampleCount(), isProtectedMemory, GetGlobalData().IsUsingFFRSoftFDMOffset());
             }
 
             return m_depthBuffer[i].GetTexture();
@@ -395,14 +413,21 @@ namespace Conformance
             bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
             for (auto& depthBuffer : m_depthBufferMSAA) {
                 depthBuffer.Allocate(m_namer, m_vkDevice, m_memAllocator, depthFormat, this->Width(), this->Height(),
-                                     this->ArraySize(), 4, isProtectedMemory);
+                                     this->ArraySize(), 4, isProtectedMemory, GetGlobalData().IsUsingFFRSoftFDMOffset());
             }
             for (auto& colorBuffer : m_colorBufferMSAA) {
                 colorBuffer.Allocate(m_namer, m_vkDevice, m_memAllocator, colorFormat, this->Width(), this->Height(),
-                                     this->ArraySize(), 4, isProtectedMemory);
+                                     this->ArraySize(), 4, isProtectedMemory, GetGlobalData().IsUsingFFRSoftFDMOffset());
             }
         }
         #endif
+
+        void prepareFdmImage( VkFormat colorFormat){
+            for (auto& colorBuffer : m_colorBufferFDM) {
+                colorBuffer.Allocate(m_namer, m_vkDevice, m_memAllocator, colorFormat, this->Width(), this->Height(),
+                                     this->ArraySize(), 1, GetGlobalData().IsUsingFFRSoftFDMOffset());
+            }
+        }
 
         VulkanDebugObjectNamer m_namer;
         VkDevice m_vkDevice{VK_NULL_HANDLE};
@@ -418,6 +443,8 @@ namespace Conformance
 
         std::vector<VulkanArraySliceState> m_slices;
         std::vector<XrSwapchainImageFoveationVulkanFB>  m_fdmImages;
+        std::vector<XrSwapchainImageFoveationVulkanFB>  m_fdmImagesSelf;
+        std::vector<FDMColorBuffer> m_colorBufferFDM;
         VkFormat m_fdmFormat{VK_FORMAT_UNDEFINED};
     };
 
@@ -1230,8 +1257,16 @@ namespace Conformance
                 extensions.push_back(createInfo->vulkanCreateInfo->ppEnabledExtensionNames[i]);
             }
 
-            extensions.push_back("VK_EXT_fragment_density_map");
-            extensions.push_back("VK_EXT_fragment_density_map2");
+            if(GetGlobalData().IsUsingFFR()){
+                extensions.push_back("VK_KHR_create_renderpass2");
+                extensions.push_back("VK_EXT_fragment_density_map");
+                extensions.push_back("VK_EXT_fragment_density_map2");
+            }
+
+            if(GetGlobalData().IsUsingFFRSoftFDMOffset()){
+                extensions.push_back("VK_QCOM_fragment_density_map_offset");
+                extensions.push_back("VK_KHR_create_renderpass2");
+            }
 
             #ifdef FEATURE_ADD_MSAA
             bool msaa_enable = GetGlobalData().IsUsingMSAA();
@@ -1286,6 +1321,7 @@ namespace Conformance
                 physicalDeviceMultiviewFeatures.pNext = NULL;
             }
 
+
 #if !defined(XR_USE_PLATFORM_ANDROID)
             VkPhysicalDeviceFeatures availableFeatures{};
             vkGetPhysicalDeviceFeatures(m_vkPhysicalDevice, &availableFeatures);
@@ -1314,6 +1350,20 @@ namespace Conformance
 
             deviceInfo.pNext = &physicalDeviceFeatures;
             deviceInfo.queueCreateInfoCount = 2;
+
+            VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM  fragmentDensityMapOffsetFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_FEATURES_QCOM};
+            VkPhysicalDeviceFragmentDensityMapFeaturesEXT fragmentDensityMapFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT};
+            if(GetGlobalData().IsUsingFFRSoftFDMOffset()){
+                fragmentDensityMapOffsetFeatures.pNext = nullptr;
+                fragmentDensityMapOffsetFeatures.fragmentDensityMapOffset = VK_TRUE;
+                fragmentDensityMapOffsetFeatures.pNext = (void*)deviceInfo.pNext;
+                deviceInfo.pNext = &fragmentDensityMapOffsetFeatures;
+                //Log::Write(Log::Level::Error,("fragmentDensityMapOffsetFeatures enabled"));
+
+                fragmentDensityMapFeatures.fragmentDensityMap= VK_TRUE;
+                fragmentDensityMapFeatures.pNext = (void*)deviceInfo.pNext;
+                deviceInfo.pNext = &fragmentDensityMapFeatures;
+            }
 
             auto pfnCreateDevice = (PFN_vkCreateDevice)createInfo->pfnGetInstanceProcAddr(m_vkInstance, "vkCreateDevice");
             *vulkanResult = pfnCreateDevice(m_vkPhysicalDevice, &deviceInfo, createInfo->vulkanAllocator, vulkanDevice);
@@ -3010,7 +3060,7 @@ namespace Conformance
             //Log::Write(Log::Level::Error, Fmt("0.2:%p", vkCmdEndRenderPass2KHR));
             //check feature
             VkPhysicalDeviceFragmentDensityMapOffsetFeaturesQCOM  offset_feature = {
-                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ROBUSTNESS_2_FEATURES_EXT,
+                .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_OFFSET_FEATURES_QCOM,
                 .pNext = NULL,
                 .fragmentDensityMapOffset = VK_FALSE
             };
@@ -3025,6 +3075,10 @@ namespace Conformance
                 pfnvkGetPhysicalDeviceFeatures2(   //
                         m_vkPhysicalDevice,            // physicalDevice
                         &physical_device_features); // pFeatures
+                VkPhysicalDeviceFragmentDensityMapFeaturesEXT fragmentDensityMapFeatures = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FRAGMENT_DENSITY_MAP_FEATURES_EXT};
+                physical_device_features.pNext = &fragmentDensityMapFeatures;
+                pfnvkGetPhysicalDeviceFeatures2(m_vkPhysicalDevice, &physical_device_features);
+                //Log::Write(Log::Level::Error, Fmt("1.2:%d,%d,%d", fragmentDensityMapFeatures.fragmentDensityMap,fragmentDensityMapFeatures.fragmentDensityMapDynamic,fragmentDensityMapFeatures.fragmentDensityMapNonSubsampledImages));
             }
 
             //Log::Write(Log::Level::Error, Fmt("2:%d", offset_feature.fragmentDensityMapOffset));
@@ -3046,7 +3100,11 @@ namespace Conformance
                 #define ALIGN(size, align) ((size + align - 1) & (~(align - 1)))
                 //Log::Write(Log::Level::Error, Fmt("4:%d,%d", offsetProperties.fragmentDensityOffsetGranularity.width, offsetProperties.fragmentDensityOffsetGranularity.height));
                 //update fdm offsets
-                VkOffset2D offsets[2] = {};
+                
+                auto size = swapchainData->GetSize();
+                
+                VkOffset2D offsets[2] = {{int(size.width/2*m_etLeftCenter.x), int(size.height/2*m_etLeftCenter.y)},
+                                         {int(size.width/2*m_etRightCenter.x), int(size.height/2*m_etRightCenter.y)}};
                 offsets[0].x = ALIGN(offsets[0].x, offsetProperties.fragmentDensityOffsetGranularity.width);
                 offsets[0].y = ALIGN(offsets[0].y, offsetProperties.fragmentDensityOffsetGranularity.height);
                 offsets[1].x = ALIGN(offsets[1].x, offsetProperties.fragmentDensityOffsetGranularity.width);
@@ -3059,6 +3117,11 @@ namespace Conformance
                     .fragmentDensityOffsetCount = 2, // fragmentDensityOffsetCount; 1 for each layer/multiview view
                     .pFragmentDensityOffsets     = offsets, // offsets are aligned to fragmentDensityOffsetGranularity
                 };
+
+                if(!multiview_enable){
+                    offsetInfo.fragmentDensityOffsetCount = 1;
+                    offsetInfo.pFragmentDensityOffsets = &offsets[0];//fixme hardcode should 0 or 1
+                }
 
                 VkSubpassEndInfo subpassEndinfo = {VK_STRUCTURE_TYPE_SUBPASS_END_INFO_KHR};
                 subpassEndinfo.pNext = &offsetInfo;
