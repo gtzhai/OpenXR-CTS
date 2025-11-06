@@ -1598,14 +1598,15 @@ namespace Conformance
         for (int layer = 0; layer < LayerCount; layer++) {
             projLayers[layer] = compositionHelper.CreateProjectionLayer(localSpace);
 
-            projLayers[layer]->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+            //projLayers[layer]->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
 
             // Add depth test info to the chain for each projection layer
             depthTestInfo[layer].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_TEST_FB;
             depthTestInfo[layer].next = projLayers[layer]->next;
             depthTestInfo[layer].depthMask = true;
-            depthTestInfo[layer].compareOp = XR_COMPARE_OP_LESS_FB;
-            const_cast<const void*&>(projLayers[layer]->next) = &depthTestInfo[layer];
+            depthTestInfo[layer].compareOp = XR_COMPARE_OP_LESS_FB;//XR_COMPARE_OP_LESS_OR_EQUAL_FB;//XR_COMPARE_OP_LESS_FB//XR_COMPARE_OP_GREATER_FB//XR_COMPARE_OP_NEVER_FB
+
+            //const_cast<const void*&>(projLayers[layer]->next) = &depthTestInfo[layer];
 
             depthInfo[layer].resize(projLayers[layer]->viewCount);
             for (uint32_t j = 0; j < projLayers[layer]->viewCount; j++) { 
@@ -1659,8 +1660,8 @@ namespace Conformance
         #endif
 
         // Alternate which cube should be in front. Rotate every cube in the second layer to tell them apart
-        float alpha = 1.0f;
-        const std::vector<Cube> cubes[LayerCount] = {
+        float alpha = 0.5f;
+        const std::vector<Cube> cubes[2] = {
             {Cube::Make({-1, 0, -2.5}), Cube::Make({1, 0, -2}), Cube::Make({0, -1, -2.5}), Cube::Make({0, 1, -2})},
             {Cube::Make({-1, 0, -2}, 0.25f, {0, 1, 0, 0}, {0, 0, 0, 0}, alpha), Cube::Make({1, 0, -2.5}, 0.25f, {0, 1, 0, 0}, {0, 0, 0, 0}, alpha),
              Cube::Make({0, -1, -2}, 0.25f, {1, 0, 0, 0}, {0, 0, 0, 0}, alpha), Cube::Make({0, 1, -2.5}, 0.25f, {1, 0, 0, 0}, {0, 0, 0, 0}, alpha)}};
@@ -1699,6 +1700,299 @@ namespace Conformance
 
         RenderLoop(session, updateLayers).Loop();
     }
+
+    TEST_CASE("ProjectionDepth", "[xxxxxx][normal][depthmask]")
+    {
+        ALOGE("Test Case:ProjectionDepth");
+        GlobalData& globalData = GetGlobalData();
+        if (!globalData.IsUsingGraphicsPlugin()) {
+            SKIP("Cannot test without a graphics plugin");
+        }
+
+        if (!globalData.IsInstanceExtensionSupported(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME)) {
+            SKIP(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME " not supported");
+        }
+        if (!globalData.IsInstanceExtensionSupported(XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME)) {
+            SKIP(XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME " not supported");
+        }
+
+        //globalData.SetProtectedMemory(true);
+
+        CompositionHelper compositionHelper(
+            "Projection Depth", {XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME, XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME});
+        InteractiveLayerManager interactiveLayerManager(compositionHelper, "projection_depth.png",
+                                                        "Four cubes each are drawn on two different layers, with the front face"
+                                                        " appearing darker on the second layer. All eight cubes should be visible,"
+                                                        " with the darker blue front face appearing closer on the left and bottom,"
+                                                        " and further away on the right and top.");
+        XrSession session = compositionHelper.GetSession();
+        InteractionManager& interactionManager = compositionHelper.GetInteractionManager();
+        interactionManager.AttachActionSets();
+        compositionHelper.BeginSession();
+
+        const XrSpace localSpace = compositionHelper.CreateReferenceSpace(XR_REFERENCE_SPACE_TYPE_LOCAL);
+
+        const std::vector<XrViewConfigurationView> viewProperties = compositionHelper.EnumerateConfigurationViews();
+
+        std::vector<XrSwapchainCreateInfo> colorSwapchainCreateInfo;
+        std::vector<XrSwapchainCreateInfo> depthSwapchainCreateInfo;
+        for (auto& view : viewProperties) {
+            colorSwapchainCreateInfo.push_back(
+                compositionHelper.DefaultColorSwapchainCreateInfo(view.recommendedImageRectWidth/2, view.recommendedImageRectHeight/2));
+            depthSwapchainCreateInfo.push_back(
+                compositionHelper.DefaultDepthSwapchainCreateInfo(view.recommendedImageRectWidth/2, view.recommendedImageRectHeight/2));
+        }
+
+        const int LayerCount = 3;
+        XrCompositionLayerProjection* projLayers[LayerCount];
+        XrCompositionLayerDepthTestFB depthTestInfo[LayerCount];
+        std::vector<std::pair<XrSwapchain, XrSwapchain>> swapchain[LayerCount];
+        std::vector<XrCompositionLayerDepthInfoKHR> depthInfo[LayerCount];
+
+        XrCompositionLayerDepthTestFB depthTestInfoOverlay;
+        depthTestInfoOverlay.type = XR_TYPE_COMPOSITION_LAYER_DEPTH_TEST_FB;
+        depthTestInfoOverlay.next = NULL;
+        depthTestInfoOverlay.depthMask = true;
+        depthTestInfoOverlay.compareOp = XR_COMPARE_OP_LESS_FB;
+
+        // Set up the projection layers
+        for (int layer = 0; layer < LayerCount; layer++) {
+            projLayers[layer] = compositionHelper.CreateProjectionLayer(localSpace);
+
+            projLayers[layer]->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+
+            // Add depth test info to the chain for each projection layer
+            depthTestInfo[layer].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_TEST_FB;
+            depthTestInfo[layer].next = projLayers[layer]->next;
+            depthTestInfo[layer].depthMask = false;
+            depthTestInfo[layer].compareOp = XR_COMPARE_OP_LESS_FB;//XR_COMPARE_OP_LESS_OR_EQUAL_FB;//XR_COMPARE_OP_LESS_FB
+
+            const_cast<const void*&>(projLayers[layer]->next) = &depthTestInfo[layer];
+
+            depthInfo[layer].resize(projLayers[layer]->viewCount);
+            for (uint32_t j = 0; j < projLayers[layer]->viewCount; j++) { 
+                bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+
+                if(isProtectedMemory){
+                    colorSwapchainCreateInfo[j].createFlags |= XR_SWAPCHAIN_CREATE_PROTECTED_CONTENT_BIT;
+                    depthSwapchainCreateInfo[j].createFlags |= XR_SWAPCHAIN_CREATE_PROTECTED_CONTENT_BIT;
+                }
+                // create color and depth swapchains
+                swapchain[layer].push_back(
+                    compositionHelper.CreateSwapchainWithDepth(colorSwapchainCreateInfo[j], depthSwapchainCreateInfo[j]));
+                const_cast<XrSwapchainSubImage&>(projLayers[layer]->views[j].subImage) =
+                    compositionHelper.MakeDefaultSubImage(swapchain[layer][j].first);
+
+                // Add depth info to the chain for each projection layer view
+                depthInfo[layer][j].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR;
+                depthInfo[layer][j].next = projLayers[layer]->views[j].next;
+                depthInfo[layer][j].minDepth = 0.0f;
+                depthInfo[layer][j].maxDepth = 1.0f;
+                depthInfo[layer][j].nearZ = 0.05f;
+                depthInfo[layer][j].farZ = 100.0f;
+                depthInfo[layer][j].subImage = compositionHelper.MakeDefaultSubImage(swapchain[layer][j].second);
+                const_cast<const void*&>(projLayers[layer]->views[j].next) = &depthInfo[layer][j];
+            }
+        }
+
+        // Alternate which cube should be in front. Rotate every cube in the second layer to tell them apart
+        float alpha = 0.1f;
+        const std::vector<Cube> cubes[LayerCount] = {
+            {Cube::Make({0, 0, -2})},
+            {Cube::Make({-1, 0, -2}, 0.25f, {0, 1, 0, 0}, {0, 0, 0, 0}, alpha), Cube::Make({1, 0, -2.5}, 0.25f, {0, 1, 0, 0}, {0, 0, 0, 0}, alpha),
+             Cube::Make({0, -1, -2}, 0.25f, {1, 0, 0, 0}, {0, 0, 0, 0}, alpha), Cube::Make({0, 1, -2.5}, 0.25f, {1, 0, 0, 0}, {0, 0, 0, 0}, alpha)},
+            {Cube::Make({-1, 0, -2.5}), Cube::Make({1, 0, -2}), Cube::Make({0, -1, -2.5}), Cube::Make({0, 1, -2})}};
+
+        auto updateLayers = [&](const XrFrameState& frameState) {
+            auto viewData = compositionHelper.LocateViews(localSpace, frameState.predictedDisplayTime);
+            const auto& viewState = std::get<XrViewState>(viewData);
+
+            std::vector<XrCompositionLayerBaseHeader*> layers;
+            if (viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT &&
+                viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) {
+                const auto& views = std::get<std::vector<XrView>>(viewData);
+
+                for (int layer = 0; layer < LayerCount; layer++) {
+                    for (size_t j = 0; j < views.size(); j++) {
+                        // Render into each view's swapchain using the projection layer view fov and pose.
+                        compositionHelper.AcquireWaitReleaseImage(
+                            swapchain[layer][j].first, [&](const XrSwapchainImageBaseHeader* swapchainImage) {
+                                if(Options::Get().environmentBlendModeValue == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND){
+                                    GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage, 0, {0.0f, 0.0f, 0.0f, 0.0f});
+                                } else {
+                                    GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage);
+                                }
+
+                                const_cast<XrFovf&>(projLayers[layer]->views[j].fov) = views[j].fov;
+                                const_cast<XrPosef&>(projLayers[layer]->views[j].pose) = views[j].pose;
+                                GetGlobalData().graphicsPlugin->RenderView(projLayers[layer]->views[j], swapchainImage,
+                                                                           RenderParams().Draw(cubes[layer]));
+                            });
+                    }
+                    layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(projLayers[layer]));
+                }
+            }
+            return interactiveLayerManager.EndFrame(frameState, layers);
+        };
+
+        RenderLoop(session, updateLayers).Loop();
+    }
+
+    TEST_CASE("ProjectionDepth", "[xxxxxx][normal][op]")
+    {
+        ALOGE("Test Case:ProjectionDepth");
+        GlobalData& globalData = GetGlobalData();
+        if (!globalData.IsUsingGraphicsPlugin()) {
+            SKIP("Cannot test without a graphics plugin");
+        }
+
+        if (!globalData.IsInstanceExtensionSupported(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME)) {
+            SKIP(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME " not supported");
+        }
+        if (!globalData.IsInstanceExtensionSupported(XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME)) {
+            SKIP(XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME " not supported");
+        }
+
+        //globalData.SetProtectedMemory(true);
+
+        CompositionHelper compositionHelper(
+            "Projection Depth", {XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME, XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME});
+        InteractiveLayerManager interactiveLayerManager(compositionHelper, "projection_depth.png",
+                                                        "Four cubes each are drawn on two different layers, with the front face"
+                                                        " appearing darker on the second layer. All eight cubes should be visible,"
+                                                        " with the darker blue front face appearing closer on the left and bottom,"
+                                                        " and further away on the right and top.");
+        XrSession session = compositionHelper.GetSession();
+        InteractionManager& interactionManager = compositionHelper.GetInteractionManager();
+        interactionManager.AttachActionSets();
+        compositionHelper.BeginSession();
+
+        const XrSpace localSpace = compositionHelper.CreateReferenceSpace(XR_REFERENCE_SPACE_TYPE_LOCAL);
+
+        const std::vector<XrViewConfigurationView> viewProperties = compositionHelper.EnumerateConfigurationViews();
+
+        std::vector<XrSwapchainCreateInfo> colorSwapchainCreateInfo;
+        std::vector<XrSwapchainCreateInfo> depthSwapchainCreateInfo;
+        for (auto& view : viewProperties) {
+            colorSwapchainCreateInfo.push_back(
+                compositionHelper.DefaultColorSwapchainCreateInfo(view.recommendedImageRectWidth/2, view.recommendedImageRectHeight/2));
+            depthSwapchainCreateInfo.push_back(
+                compositionHelper.DefaultDepthSwapchainCreateInfo(view.recommendedImageRectWidth/2, view.recommendedImageRectHeight/2));
+        }
+
+        const int LayerCount = 3;
+        XrCompositionLayerProjection* projLayers[LayerCount];
+        XrCompositionLayerDepthTestFB depthTestInfo[LayerCount];
+        std::vector<std::pair<XrSwapchain, XrSwapchain>> swapchain[LayerCount];
+        std::vector<XrCompositionLayerDepthInfoKHR> depthInfo[LayerCount];
+
+        XrCompositionLayerDepthTestFB depthTestInfoOverlay;
+        depthTestInfoOverlay.type = XR_TYPE_COMPOSITION_LAYER_DEPTH_TEST_FB;
+        depthTestInfoOverlay.next = NULL;
+        depthTestInfoOverlay.depthMask = true;
+        depthTestInfoOverlay.compareOp = XR_COMPARE_OP_LESS_FB;
+        depthTestInfoOverlay.compareOp = XR_COMPARE_OP_NEVER_FB;
+        depthTestInfoOverlay.compareOp = XR_COMPARE_OP_EQUAL_FB;
+        depthTestInfoOverlay.compareOp = XR_COMPARE_OP_LESS_OR_EQUAL_FB;
+        depthTestInfoOverlay.compareOp = XR_COMPARE_OP_GREATER_FB;
+        depthTestInfoOverlay.compareOp = XR_COMPARE_OP_NOT_EQUAL_FB;
+        depthTestInfoOverlay.compareOp = XR_COMPARE_OP_GREATER_OR_EQUAL_FB;
+        depthTestInfoOverlay.compareOp = XR_COMPARE_OP_ALWAYS_FB;
+
+        // Set up the projection layers
+        for (int layer = 0; layer < LayerCount; layer++) {
+            projLayers[layer] = compositionHelper.CreateProjectionLayer(localSpace);
+
+            //projLayers[layer]->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+
+            // Add depth test info to the chain for each projection layer
+            depthTestInfo[layer].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_TEST_FB;
+            depthTestInfo[layer].next = projLayers[layer]->next;
+            depthTestInfo[layer].depthMask = true;
+            if(layer == 0){
+                depthTestInfo[layer].compareOp = XR_COMPARE_OP_LESS_FB;
+            } else {
+                depthTestInfo[layer].compareOp = XR_COMPARE_OP_NEVER_FB;
+                depthTestInfo[layer].compareOp = XR_COMPARE_OP_ALWAYS_FB;
+                depthTestInfo[layer].compareOp = XR_COMPARE_OP_LESS_FB;
+                //depthTestInfo[layer].compareOp = XR_COMPARE_OP_LESS_OR_EQUAL_FB;
+                //depthTestInfo[layer].compareOp = XR_COMPARE_OP_EQUAL_FB;
+                //depthTestInfo[layer].compareOp = XR_COMPARE_OP_NOT_EQUAL_FB;
+                //depthTestInfo[layer].compareOp = XR_COMPARE_OP_GREATER_FB;
+                //depthTestInfo[layer].compareOp = XR_COMPARE_OP_GREATER_OR_EQUAL_FB;
+            }
+
+            //const_cast<const void*&>(projLayers[layer]->next) = &depthTestInfo[layer];
+
+            depthInfo[layer].resize(projLayers[layer]->viewCount);
+            for (uint32_t j = 0; j < projLayers[layer]->viewCount; j++) { 
+                bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+
+                if(isProtectedMemory){
+                    colorSwapchainCreateInfo[j].createFlags |= XR_SWAPCHAIN_CREATE_PROTECTED_CONTENT_BIT;
+                    depthSwapchainCreateInfo[j].createFlags |= XR_SWAPCHAIN_CREATE_PROTECTED_CONTENT_BIT;
+                }
+                // create color and depth swapchains
+                swapchain[layer].push_back(
+                    compositionHelper.CreateSwapchainWithDepth(colorSwapchainCreateInfo[j], depthSwapchainCreateInfo[j]));
+                const_cast<XrSwapchainSubImage&>(projLayers[layer]->views[j].subImage) =
+                    compositionHelper.MakeDefaultSubImage(swapchain[layer][j].first);
+
+                // Add depth info to the chain for each projection layer view
+                depthInfo[layer][j].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR;
+                depthInfo[layer][j].next = projLayers[layer]->views[j].next;
+                depthInfo[layer][j].minDepth = 0.0f;
+                depthInfo[layer][j].maxDepth = 1.0f;
+                depthInfo[layer][j].nearZ = 0.05f;
+                depthInfo[layer][j].farZ = 100.0f;
+                depthInfo[layer][j].subImage = compositionHelper.MakeDefaultSubImage(swapchain[layer][j].second);
+                const_cast<const void*&>(projLayers[layer]->views[j].next) = &depthInfo[layer][j];
+            }
+        }
+
+        // Alternate which cube should be in front. Rotate every cube in the second layer to tell them apart
+        float alpha = 0.1f;
+        const std::vector<Cube> cubes[LayerCount] = {
+            {Cube::Make({0, 0, -2})},
+            {Cube::Make({-1, 0, -2.5}), Cube::Make({1, 0, -2}), Cube::Make({0, -1, -2.5}), Cube::Make({0, 1, -2})},
+            {Cube::Make({-1, 0, -2}, 0.25f, {0, 1, 0, 0}, {0, 0, 0, 0}, alpha), Cube::Make({1, 0, -2.5}, 0.25f, {0, 1, 0, 0}, {0, 0, 0, 0}, alpha),
+             Cube::Make({0, -1, -2}, 0.25f, {1, 0, 0, 0}, {0, 0, 0, 0}, alpha), Cube::Make({0, 1, -2.5}, 0.25f, {1, 0, 0, 0}, {0, 0, 0, 0}, alpha)}};
+
+        auto updateLayers = [&](const XrFrameState& frameState) {
+            auto viewData = compositionHelper.LocateViews(localSpace, frameState.predictedDisplayTime);
+            const auto& viewState = std::get<XrViewState>(viewData);
+
+            std::vector<XrCompositionLayerBaseHeader*> layers;
+            if (viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT &&
+                viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) {
+                const auto& views = std::get<std::vector<XrView>>(viewData);
+
+                for (int layer = 0; layer < LayerCount; layer++) {
+                    for (size_t j = 0; j < views.size(); j++) {
+                        // Render into each view's swapchain using the projection layer view fov and pose.
+                        compositionHelper.AcquireWaitReleaseImage(
+                            swapchain[layer][j].first, [&](const XrSwapchainImageBaseHeader* swapchainImage) {
+                                if(Options::Get().environmentBlendModeValue == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND){
+                                    GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage, 0, {0.0f, 0.0f, 0.0f, 0.0f});
+                                } else {
+                                    GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage);
+                                }
+
+                                const_cast<XrFovf&>(projLayers[layer]->views[j].fov) = views[j].fov;
+                                const_cast<XrPosef&>(projLayers[layer]->views[j].pose) = views[j].pose;
+                                GetGlobalData().graphicsPlugin->RenderView(projLayers[layer]->views[j], swapchainImage,
+                                                                           RenderParams().Draw(cubes[layer]));
+                            });
+                    }
+                    layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(projLayers[layer]));
+                }
+            }
+            return interactiveLayerManager.EndFrame(frameState, layers);
+        };
+
+        RenderLoop(session, updateLayers).Loop();
+    }
+
 
     TEST_CASE("ProjectionDepthWithVST", "[xxxxxx][VST]")
     {
@@ -2099,6 +2393,154 @@ namespace Conformance
 
         RenderLoop(session, updateLayers).Loop();
     }
+
+    TEST_CASE("ProjectionDepthWithMiddleOverlay", "[xxxxxx][middleoverlay]")
+    {
+        ALOGE("Test Case:ProjectionDepthWithMiddleOverlay");
+        GlobalData& globalData = GetGlobalData();
+        if (!globalData.IsUsingGraphicsPlugin()) {
+            SKIP("Cannot test without a graphics plugin");
+        }
+
+        if (!globalData.IsInstanceExtensionSupported(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME)) {
+            SKIP(XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME " not supported");
+        }
+        if (!globalData.IsInstanceExtensionSupported(XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME)) {
+            SKIP(XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME " not supported");
+        }
+
+        //globalData.SetProtectedMemory(true);
+
+        CompositionHelper compositionHelper(
+            "Projection Depth With Middle Overlay", {XR_KHR_COMPOSITION_LAYER_DEPTH_EXTENSION_NAME, XR_FB_COMPOSITION_LAYER_DEPTH_TEST_EXTENSION_NAME});
+        InteractiveLayerManager interactiveLayerManager(compositionHelper, "projection_depth.png",
+                                                        "Four cubes each are drawn on two different layers, with the front face"
+                                                        " appearing darker on the second layer. All eight cubes should be visible,"
+                                                        " with the darker blue front face appearing closer on the left and bottom,"
+                                                        " and further away on the right and top.");
+        XrSession session = compositionHelper.GetSession();
+        InteractionManager& interactionManager = compositionHelper.GetInteractionManager();
+        interactionManager.AttachActionSets();
+        compositionHelper.BeginSession();
+
+        const XrSpace localSpace = compositionHelper.CreateReferenceSpace(XR_REFERENCE_SPACE_TYPE_LOCAL);
+
+        const std::vector<XrViewConfigurationView> viewProperties = compositionHelper.EnumerateConfigurationViews();
+
+        std::vector<XrSwapchainCreateInfo> colorSwapchainCreateInfo;
+        std::vector<XrSwapchainCreateInfo> depthSwapchainCreateInfo;
+        for (auto& view : viewProperties) {
+            colorSwapchainCreateInfo.push_back(
+                compositionHelper.DefaultColorSwapchainCreateInfo(view.recommendedImageRectWidth/2, view.recommendedImageRectHeight/2));
+            depthSwapchainCreateInfo.push_back(
+                compositionHelper.DefaultDepthSwapchainCreateInfo(view.recommendedImageRectWidth/2, view.recommendedImageRectHeight/2));
+        }
+
+        const int LayerCount = 2;
+        XrCompositionLayerProjection* projLayers[LayerCount];
+        XrCompositionLayerDepthTestFB depthTestInfo[LayerCount];
+        std::vector<std::pair<XrSwapchain, XrSwapchain>> swapchain[LayerCount];
+        std::vector<XrCompositionLayerDepthInfoKHR> depthInfo[LayerCount];
+
+        XrCompositionLayerDepthTestFB depthTestInfoOverlay;
+        depthTestInfoOverlay.type = XR_TYPE_COMPOSITION_LAYER_DEPTH_TEST_FB;
+        depthTestInfoOverlay.next = NULL;
+        depthTestInfoOverlay.depthMask = true;
+        depthTestInfoOverlay.compareOp = XR_COMPARE_OP_LESS_FB;
+
+        // Set up the projection layers
+        for (int layer = 0; layer < LayerCount; layer++) {
+            projLayers[layer] = compositionHelper.CreateProjectionLayer(localSpace);
+
+            projLayers[layer]->layerFlags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT;
+
+            // Add depth test info to the chain for each projection layer
+            depthTestInfo[layer].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_TEST_FB;
+            depthTestInfo[layer].next = projLayers[layer]->next;
+            depthTestInfo[layer].depthMask = true;
+            depthTestInfo[layer].compareOp = XR_COMPARE_OP_LESS_FB;
+            const_cast<const void*&>(projLayers[layer]->next) = &depthTestInfo[layer];
+
+            depthInfo[layer].resize(projLayers[layer]->viewCount);
+            for (uint32_t j = 0; j < projLayers[layer]->viewCount; j++) { 
+                bool isProtectedMemory = GetGlobalData().IsProtectedMemory();
+
+                if(isProtectedMemory){
+                    colorSwapchainCreateInfo[j].createFlags |= XR_SWAPCHAIN_CREATE_PROTECTED_CONTENT_BIT;
+                    depthSwapchainCreateInfo[j].createFlags |= XR_SWAPCHAIN_CREATE_PROTECTED_CONTENT_BIT;
+                }
+                // create color and depth swapchains
+                swapchain[layer].push_back(
+                    compositionHelper.CreateSwapchainWithDepth(colorSwapchainCreateInfo[j], depthSwapchainCreateInfo[j]));
+                const_cast<XrSwapchainSubImage&>(projLayers[layer]->views[j].subImage) =
+                    compositionHelper.MakeDefaultSubImage(swapchain[layer][j].first);
+
+                // Add depth info to the chain for each projection layer view
+                depthInfo[layer][j].type = XR_TYPE_COMPOSITION_LAYER_DEPTH_INFO_KHR;
+                depthInfo[layer][j].next = projLayers[layer]->views[j].next;
+                depthInfo[layer][j].minDepth = 0.0f;
+                depthInfo[layer][j].maxDepth = 1.0f;
+                depthInfo[layer][j].nearZ = 0.05f;
+                depthInfo[layer][j].farZ = 100.0f;
+                depthInfo[layer][j].subImage = compositionHelper.MakeDefaultSubImage(swapchain[layer][j].second);
+                const_cast<const void*&>(projLayers[layer]->views[j].next) = &depthInfo[layer][j];
+            }
+        }
+
+        const XrSwapchain graySwapchain = compositionHelper.CreateStaticSwapchainSolidColor(Colors::Gray);
+        const XrQuaternionf identRot = Quat::FromAxisAngle({0, 1, 0}, DegToRad(0));
+        XrCompositionLayerQuad* quad = compositionHelper.CreateQuadLayer(graySwapchain, localSpace, 1.0f, XrPosef{identRot, {0, 1, -3}});
+        const_cast<const void*&>(quad->next) = &depthTestInfoOverlay;
+
+        // Alternate which cube should be in front. Rotate every cube in the second layer to tell them apart
+        float alpha = 1.0f;
+        const std::vector<Cube> cubes[LayerCount] = {
+            {Cube::Make({-1, 0, -2.5}), Cube::Make({1, 0, -2}), Cube::Make({0, -1, -2.5}), Cube::Make({0, 1, -2})},
+            {Cube::Make({-1, 0, -2}, 0.25f, {0, 1, 0, 0}, {0, 0, 0, 0}, alpha), Cube::Make({1, 0, -2.5}, 0.25f, {0, 1, 0, 0}, {0, 0, 0, 0}, alpha),
+             Cube::Make({0, -1, -2}, 0.25f, {1, 0, 0, 0}, {0, 0, 0, 0}, alpha), Cube::Make({0, 1, -2.5}, 0.25f, {1, 0, 0, 0}, {0, 0, 0, 0}, alpha)}};
+
+        auto updateLayers = [&](const XrFrameState& frameState) {
+            auto viewData = compositionHelper.LocateViews(localSpace, frameState.predictedDisplayTime);
+            const auto& viewState = std::get<XrViewState>(viewData);
+
+            std::vector<XrCompositionLayerBaseHeader*> layers;
+            if (viewState.viewStateFlags & XR_VIEW_STATE_POSITION_VALID_BIT &&
+                viewState.viewStateFlags & XR_VIEW_STATE_ORIENTATION_VALID_BIT) {
+                const auto& views = std::get<std::vector<XrView>>(viewData);
+
+                for (int layer = 0; layer < LayerCount; layer++) {
+                    for (size_t j = 0; j < views.size(); j++) {
+                        // Render into each view's swapchain using the projection layer view fov and pose.
+                        compositionHelper.AcquireWaitReleaseImage(
+                            swapchain[layer][j].first, [&](const XrSwapchainImageBaseHeader* swapchainImage) {
+                                if(Options::Get().environmentBlendModeValue == XR_ENVIRONMENT_BLEND_MODE_ALPHA_BLEND){
+                                    GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage, 0, {0.0f, 0.0f, 0.0f, 0.0f});
+                                } else {
+                                    if(layer == 0){
+                                        GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage);
+                                    } else {
+                                        GetGlobalData().graphicsPlugin->ClearImageSlice(swapchainImage, 0, {0.0f, 0.0f, 0.0f, 0.0f});
+                                    }
+                                }
+
+                                const_cast<XrFovf&>(projLayers[layer]->views[j].fov) = views[j].fov;
+                                const_cast<XrPosef&>(projLayers[layer]->views[j].pose) = views[j].pose;
+                                GetGlobalData().graphicsPlugin->RenderView(projLayers[layer]->views[j], swapchainImage,
+                                                                           RenderParams().Draw(cubes[layer]));
+                            });
+                    }
+                    layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(projLayers[layer]));
+                    if(layer == 0){
+                        layers.push_back(reinterpret_cast<XrCompositionLayerBaseHeader*>(quad));
+                    }
+                }
+            }
+            return interactiveLayerManager.EndFrame(frameState, layers);
+        };
+
+        RenderLoop(session, updateLayers).Loop();
+    }
+
 
     TEST_CASE("ProjectionWithWrongAlphaVST", "[xxxxxx][projwrongalpha][VST]")
     {

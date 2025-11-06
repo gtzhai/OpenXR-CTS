@@ -32,6 +32,7 @@
         android:name="com.oculus.feature.PASSTHROUGH"
         android:required="true"
         />
+    <uses-permission android:name="com.oculus.permission.USE_SCENE" />
 
     <queries>
         <!-- to talk to the broker -->
@@ -79,6 +80,7 @@
 
                 <category android:name="android.intent.category.LAUNCHER" />
                 <category android:name="org.khronos.openxr.intent.category.IMMERSIVE_HMD" />
+                <category android:name="com.oculus.intent.category.VR" />
             </intent-filter>
         </activity>
     </application>

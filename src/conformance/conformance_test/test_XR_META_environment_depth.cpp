@@ -165,6 +165,7 @@ namespace Conformance
             ALOGE("%s::%s failed for swapchain_ is null", module, __FUNCTION__);
             return -1;
         }
+        XRC_CHECK_THROW_XRCMD(xrDestroyEnvironmentDepthSwapchainMETA(swapchain_));
         return 0;
     }
 
@@ -514,6 +515,69 @@ namespace Conformance
 
         XRC_CHECK_THROW_XRCMD(xrPassthroughPauseFB(passthrough));
         XRC_CHECK_THROW_XRCMD(xrDestroyPassthroughFB(passthrough));
+    }
+
+    TEST_CASE("EnvironmentDepth", "[xxxxxx][envdepth][destroy]")
+    {
+        ALOGE("Test Case:EnvironmentDepth");
+        GlobalData& globalData = GetGlobalData();
+
+        globalData.SetUsingMultiview(true);
+        globalData.SetUsingEnvDepthOcclusion(true);
+
+        if (!globalData.IsUsingGraphicsPlugin()) {
+            SKIP("Cannot test without a graphics plugin");
+        }
+
+        if (!globalData.IsInstanceExtensionSupported(XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME)) {
+            //SKIP(XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME " not supported");
+        }
+
+        if (!globalData.IsInstanceExtensionSupported(XR_FB_PASSTHROUGH_EXTENSION_NAME)) {
+            SKIP(XR_FB_PASSTHROUGH_EXTENSION_NAME " not supported");
+        }
+
+        bool isVulkan = globalData.IsGraphicsPluginVulkan();
+
+        CompositionHelper compositionHelper(
+            "Environment Depth", {XR_META_ENVIRONMENT_DEPTH_EXTENSION_NAME, XR_FB_PASSTHROUGH_EXTENSION_NAME});
+
+        InteractiveLayerManager interactiveLayerManager(compositionHelper, "projection_depth.png",
+                                                        "Four cubes each are drawn on two different layers, with the front face"
+                                                        " appearing darker on the second layer. All eight cubes should be visible,"
+                                                        " with the darker blue front face appearing closer on the left and bottom,"
+                                                        " and further away on the right and top.");
+        XrSession session = compositionHelper.GetSession();
+        InteractionManager& interactionManager = compositionHelper.GetInteractionManager();
+        interactionManager.AttachActionSets();
+        compositionHelper.BeginSession();
+
+        const XrSpace localSpace = compositionHelper.CreateReferenceSpace(XR_REFERENCE_SPACE_TYPE_LOCAL);
+
+        const std::vector<XrViewConfigurationView> viewProperties = compositionHelper.EnumerateConfigurationViews();
+
+        std::vector<XrSwapchainCreateInfo> colorSwapchainCreateInfo;
+        std::vector<XrSwapchainCreateInfo> depthSwapchainCreateInfo;
+
+        colorSwapchainCreateInfo.push_back(
+                compositionHelper.DefaultColorSwapchainCreateInfo(viewProperties[0].recommendedImageRectWidth, viewProperties[0].recommendedImageRectHeight, 0, -1, 2));
+        depthSwapchainCreateInfo.push_back(
+                compositionHelper.DefaultDepthSwapchainCreateInfo(viewProperties[0].recommendedImageRectWidth, viewProperties[0].recommendedImageRectHeight, 0, -1, 2));
+
+        XrInstance instance = compositionHelper.GetInstance();
+
+        std::shared_ptr<EnvironmentDepthMeta> env_depth_context_ = std::make_shared<EnvironmentDepthMeta>(compositionHelper);
+
+        ALOGE("xxxxxx:in");
+        env_depth_context_->CreateEnvironmentDepthProvider();
+        env_depth_context_->CreateEnvironmentDepthSwapchain();
+
+        ALOGE("xxxxxx:1");
+        ALOGE("xxxxxx:2");
+        env_depth_context_->DestroyEnvironmentDepthSwapchain();
+        ALOGE("xxxxxx:3");
+        env_depth_context_->DestroyEnvironmentDepthProvider();
+        ALOGE("xxxxxx:out");
     }
 
 }  // namespace Conformance
